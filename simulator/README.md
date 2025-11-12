@@ -20,7 +20,7 @@ $ mvn clean install
 To execute a simulation it is necessary to call the run.sh, with a configuration file as a parameter. For example:
 
 ```shell
-$ ./run.sh config/kademlia.cfg
+$ ./run.sh config/3k.cfg
 ```
 
 ## Code Documentation

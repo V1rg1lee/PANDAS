@@ -43,13 +43,19 @@ of RAM.
 
 ```
 PANDAS/
-├── simulator/     # Source code for large-scale simulator experiments
-│   ├── configs/   # Configuration files for network simulations
-│   ├── Results/   # Experiment results
-│   └── python/    # Plotting scripts
-└── prototype/       # Source code for real-world prototype experiments
-    ├── results/   # Prototype experiment results
-    └── python/    # Log processing and plotting
+├── simulator/                      # Source code for large-scale simulator experiments
+│   ├── configs/                    # Configuration files for network simulations
+│   │    ├── configPaper/           # Configuration files used in the paper for perf: Figure 12 13 and 14 
+│   │    ├── configAdversary/       # Configuration files for resilience against dead nodes: Figure 15
+│   │    ├── configPaper1K/         # Configuration files for test of redundancy of samples: Figure 9 10 11 12
+│   │    ├── configReel/            # Configuration files for validation with the prototype and validation of strategy
+│   │    └── configPaper/           # Configuration files for validation with the prototype and validation of strategy
+│   ├── src/                        # Code of the simulator
+│   │    └── kademlia/das           # Folder containing PANDAS code used in the sumlator
+│   └── python/                     # Plotting scripts
+└── prototype/                      # Source code for real-world prototype experiments
+    ├── results/                    # Prototype experiment results
+    └── python/                     # Log processing and plotting
 ```
 
 ---
@@ -66,7 +72,7 @@ To install all requirements and build the simulator:
 
 ```bash
 cd simulator/
-sudo chmod +x setup.sh && ./setup.sh
+sudo chmod +x install.sh && ./install.sh
 ```
 
 This script will:

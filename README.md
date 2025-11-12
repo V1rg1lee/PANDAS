@@ -54,8 +54,10 @@ PANDAS/
 │   │    └── kademlia/das           # Folder containing PANDAS code used in the sumlator
 │   └── python/                     # Plotting scripts
 └── prototype/                      # Source code for real-world prototype experiments
-    ├── results/                    # Prototype experiment results
-    └── python/                     # Log processing and plotting
+│   ├── Latency/                    # Latency used for the prototype
+│   ├── Launching_scripts/          # Script used to install and launch experiment on grid5000
+│   ├── results/                    # Prototype experiment results
+│   └── python/                     # Log processing and plotting
 ```
 
 ---

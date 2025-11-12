@@ -108,7 +108,7 @@ To plot the experiment results:
 
 ```bash
 cd simulator/python
-python3 plot_results.py <results_folder>
+python3 plot_results.py
 ```
 
 The generated plots will be saved in `simulator/python/plots/`

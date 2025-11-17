@@ -1,7 +1,7 @@
 #!/bin/bash
 # ========== Parameters ==========                                                             
 nodes_file="./nodes.csv"
-num_validators=5
+num_validators=$1
 num_regular_nodes=0
 
 while getopts v:r: flag

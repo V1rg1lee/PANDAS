@@ -36,10 +36,7 @@ public class DASTransport implements Transport {
       // Parse the JSON file using Gson
       List<NodeLatency> nodes =
           gson.fromJson(
-              new FileReader(
-                  Paths.get("/root/DAS-simulator/kademlia-simulator/simulator/config/latency.json")
-                      .toFile()),
-              nodeLatencyListType);
+              new FileReader(Paths.get("./configs/latency.json").toFile()), nodeLatencyListType);
 
       // Assign latencies from the parsed JSON data
       for (int i = 0; i < size; i++) {

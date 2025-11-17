@@ -16,7 +16,7 @@ do
     ip=`echo "$line" | cut -d',' -f4`
     node_type=$(echo "$line" | rev | cut -d',' -f1 | rev)
 
-    $binary_path -ip=$ip -port=$port -UDPport=$udp_port -nodeType=$node_type -debug=true -nick=${nick} -key=./keys/${nick}.key&
+    $binary_path -ip=$ip -port=$port -duration=1000 -UDPport=$udp_port -nodeType=$node_type -debug=true -nick=${nick} -key=./keys/${nick}.key&
 
     if [ $? -ne 0 ]; then
         echo "Error running $nick"
@@ -24,6 +24,7 @@ do
     fi  
 done < $topo_file
 
+sleep 1200
 FAIL=0
 # Wait for the nodes to finish
 for job in `jobs -p`

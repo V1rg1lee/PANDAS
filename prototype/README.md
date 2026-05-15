@@ -1,32 +1,42 @@
-# PANDAS
-PANDAS implementation in go
+# Minimal GossipSub Prototype
 
+This directory contains a standalone libp2p GossipSub executable.
 
-## Building
+The old application protocol has been removed. The executable exposes only the
+flags used by the GossipSub runner.
+
+## Build
+
+```sh
+go build -o libp2p-das .
 ```
-go build main.go
+
+## Runtime Inputs
+
+The binary expects:
+
+- `-key`: a libp2p private key file;
+- `-node`: a CSV file with rows shaped as:
+
+```csv
+nick,tcp_port,udp_port,ip,multiaddr,role
 ```
 
-## Create Topology
-We have a simple file creating a topology `create_topo.sh`. It outputs a `./nodes.csv` file that can be used to run the nodes. 
+The runner uses `nick`, `tcp_port`, `ip`, and `multiaddr`. The `udp_port` and
+`role` columns are kept as explicit metadata in the static topology file.
 
-By default, it creates a topology with 1 builder, 2 validators and 4 regular nodes. 
+## Useful Flags
 
-You can run `create_topoo.sh -v 10 -r 20` to change to number of validators to 10 and regular nodes to 20.
+- `-gossipTopic`: topic to join.
+- `-gossipInterval`: seconds between publishes.
+- `-gossipMessageBytes`: payload size per publish.
+- `-duration`: run duration in seconds.
+- `-log`: directory where `.trace` files are written.
 
-## Running
-Use `./run_local.sh <topology_file>` to run the nodes locally.
+## Grid5000
 
-## Running on Grid5k
+Use:
 
-use `ssh mapigaglio@access.grid5000.fr` to access g5k gateway
-
-on the gateway use `ssh nancy` to jump to the cluster site
-
-use `git clone https://github.com/datahop/PANDAS.git` to clone Pandas git
-
-run the experiment with `python PANDAS/experiment_launch.py`
-
-at the end of the experiment use `zip -r results.zip results` to create an archive of the results
-
-use `scp mapigaglio@access.grid5000.fr:nancy/pandas1000Log.zip .` to get the result archive locally 
+```sh
+Launching_scripts/grid5000_smoke_test_gossipsub.md
+```

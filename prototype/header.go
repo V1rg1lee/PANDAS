@@ -1,8 +1,6 @@
 package main
 
 import (
-	//"context"
-
 	"context"
 	"encoding/json"
 	"log"
@@ -11,90 +9,88 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 )
 
-const headerBufSize = 128
+const gossipBufferSize = 128
 
-var headerSize = 512 //bytes
-
-type Pub struct {
-	host     host.Host
-	ctx      context.Context
-	ps       *pubsub.PubSub
-	topic    *pubsub.Topic
-	sub      *pubsub.Subscription
-	messages chan *HeaderMessage
+type GossipPubSub struct {
+	host        host.Host
+	ctx         context.Context
+	topic       *pubsub.Topic
+	sub         *pubsub.Subscription
+	Messages    chan *GossipMessage
+	messageSize int
 }
 
-type HeaderMessage struct {
-	SenderID string `json:"SenderID"`
-	BlockID  int    `json:"BlockID"`
-	Header   []byte `json:"Samples"` // List of samples in a response
+type GossipMessage struct {
+	SenderID string `json:"sender_id"`
+	Sequence int    `json:"sequence"`
+	Payload  []byte `json:"payload"`
 }
 
-func CreatePubSub(h host.Host, ctx context.Context, LogDirectory string, NickFlag string) (*Pub, error) {
-	tracer, err := pubsub.NewJSONTracer(LogDirectory + NickFlag + ".trace")
-	if err != nil {
-		panic(err)
-	}
-	// Create a new PubSub instance and connect to topic
-	ps, err := pubsub.NewGossipSub(ctx, h, pubsub.WithEventTracer(tracer))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	topic, err := ps.Join("header-dissemination")
+func CreatePubSubWithTopic(h host.Host, ctx context.Context, logDirectory string, nick string, topicName string, messageSize int) (*GossipPubSub, error) {
+	tracer, err := pubsub.NewJSONTracer(tracePath(logDirectory, nick))
 	if err != nil {
 		return nil, err
 	}
 
-	// and subscribe to it
+	ps, err := pubsub.NewGossipSub(ctx, h, pubsub.WithEventTracer(tracer))
+	if err != nil {
+		return nil, err
+	}
+
+	topic, err := ps.Join(topicName)
+	if err != nil {
+		return nil, err
+	}
+
 	sub, err := topic.Subscribe()
 	if err != nil {
 		return nil, err
 	}
 
-	return &Pub{
-		host:     h,
-		ctx:      ctx,
-		ps:       ps,
-		topic:    topic,
-		sub:      sub,
-		messages: make(chan *HeaderMessage, headerBufSize),
+	return &GossipPubSub{
+		host:        h,
+		ctx:         ctx,
+		topic:       topic,
+		sub:         sub,
+		Messages:    make(chan *GossipMessage, gossipBufferSize),
+		messageSize: messageSize,
 	}, nil
 }
 
-func (p *Pub) HeaderPublish(blockID int) error {
-
-	m := &HeaderMessage{
+func (p *GossipPubSub) Publish(sequence int) error {
+	message := &GossipMessage{
 		SenderID: p.host.ID().String(),
-		BlockID:  blockID,
-		Header:   make([]byte, headerSize),
+		Sequence: sequence,
+		Payload:  make([]byte, p.messageSize),
 	}
-	msgBytes, err := json.Marshal(m)
+
+	msgBytes, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("\033[31m Block %d Header Publish \033[0m", blockID)
+	log.Printf("GossipSub publish sequence=%d bytes=%d", sequence, len(message.Payload))
 	return p.topic.Publish(p.ctx, msgBytes)
 }
 
-func (p *Pub) readLoop() {
+func (p *GossipPubSub) ReadLoop() {
+	defer close(p.Messages)
+
 	for {
 		msg, err := p.sub.Next(p.ctx)
 		if err != nil {
-			close(p.messages)
 			return
 		}
-		// only forward messages delivered by others
 		if msg.ReceivedFrom == p.host.ID() {
 			continue
 		}
-		cm := new(HeaderMessage)
-		err = json.Unmarshal(msg.Data, cm)
-		if err != nil {
+
+		decoded := new(GossipMessage)
+		if err := json.Unmarshal(msg.Data, decoded); err != nil {
+			log.Printf("failed to decode GossipSub message: %v", err)
 			continue
 		}
-		// send valid messages onto the Messages channel
-		p.messages <- cm
+
+		p.Messages <- decoded
 	}
 }

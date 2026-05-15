@@ -27,7 +27,7 @@ Delete files with:
 ```sh
     for h in "${HOSTS[@]}"; do
         echo "Removing temp dir on $h"
-        ssh "$h" "rm -rf /tmp/PANDAS-smoke"
+        ssh "$h" "rm -rf /tmp/gossipsub-smoke"
     done
 ```
 

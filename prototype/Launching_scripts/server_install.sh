@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Build the GossipSub/PANDAS binary expected by run.sh.
+# Build the GossipSub binary expected by run.sh.
 
 die() {
     echo "server_install.sh: $*" >&2
@@ -16,8 +16,8 @@ fi
 echo "========== Prerequisites Install =========="
 
 login=$1
-source_dir=${PANDAS_SOURCE_DIR:-"/home/${login}/PANDAS"}
-go_version=${PANDAS_GO_VERSION:-"1.21.6"}
+source_dir=${GOSSIPSUB_SOURCE_DIR:-"/home/${login}/PANDAS/prototype"}
+go_version=${GOSSIPSUB_GO_VERSION:-"1.21.6"}
 go_tarball="go${go_version}.linux-amd64.tar.gz"
 go_url="https://go.dev/dl/${go_tarball}"
 

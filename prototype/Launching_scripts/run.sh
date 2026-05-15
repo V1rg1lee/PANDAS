@@ -1,25 +1,17 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Launch a GossipSub/PANDAS node process on the current Grid5000 host.
+# Launch a GossipSub node process on the current Grid5000 host.
 #
-# Arguments kept for compatibility with experiment_launch.py:
 #   1 topology CSV
-#   2 num_blocks      (currently unused by libp2p-das)
-#   3 key directory
-#   4 log directory   (passed to libp2p-das -log and used for sar logs)
-#   5 local IP        (the IP for this Grid5000 host)
-#   6 duration        (seconds)
-#   7 Grid5000 login
-#   8 builder_ip      (currently unused by libp2p-das)
-#   9 experiment root (used for per-node stdout under Log/)
-#
-# Optional for the first validation run:
-#   tc_config.py and tracer.sh are not invoked here. Run them separately only
-#   when latency shaping or pubsub tracing is needed.
+#   2 key directory
+#   3 log directory   (passed to libp2p-das -log and used for sar logs)
+#   4 local IP        (the IP for this Grid5000 host)
+#   5 duration        (seconds)
+#   6 experiment root (used for per-node stdout under Log/)
 
 usage() {
-    echo "Usage: $0 <topology.csv> <num_blocks-unused> <key_dir> <log_dir> <local_ip> <duration_s> <login> <builder_ip-unused> <experiment_root>" >&2
+    echo "Usage: $0 <topology.csv> <key_dir> <log_dir> <local_ip> <duration_s> <experiment_root>" >&2
 }
 
 die() {
@@ -27,24 +19,17 @@ die() {
     exit 1
 }
 
-if [ "$#" -lt 9 ]; then
+if [ "$#" -lt 6 ]; then
     usage
     exit 1
 fi
 
 topo_file=$1
-num_blocks=$2
-key_directory=$3
-log_directory=$4
-local_ip=$5
-duration=$6
-login=$7
-builder_ip=$8
-experiment_root=$9
-
-# Compatibility-only values. They document the legacy argument contract without
-# pretending to configure the current binary.
-: "$num_blocks" "$builder_ip"
+key_directory=$2
+log_directory=$3
+local_ip=$4
+duration=$5
+experiment_root=$6
 
 case "$duration" in
     ''|*[!0-9]*) die "duration must be an integer number of seconds, got '$duration'" ;;
@@ -52,17 +37,29 @@ esac
 
 [ -f "$topo_file" ] || die "topology file does not exist: $topo_file"
 [ -d "$key_directory" ] || die "key directory does not exist: $key_directory"
-[ -n "$login" ] || die "login must not be empty"
 [ -n "$local_ip" ] || die "local IP must not be empty"
 
-source_dir=${PANDAS_SOURCE_DIR:-"/home/${login}/PANDAS"}
-work_dir=${PANDAS_WORK_DIR:-"/tmp/PANDAS"}
-binary_path=${PANDAS_BINARY_PATH:-"${work_dir}/libp2p-das"}
-sleep_margin=${PANDAS_SLEEP_MARGIN:-15}
-node_stdout_dir=${PANDAS_NODE_STDOUT_DIR:-"${experiment_root%/}/Log"}
+source_dir=${GOSSIPSUB_SOURCE_DIR:-"$PWD"}
+work_dir=${GOSSIPSUB_WORK_DIR:-"/tmp/gossipsub"}
+binary_path=${GOSSIPSUB_BINARY_PATH:-"${work_dir}/libp2p-das"}
+sleep_margin=${GOSSIPSUB_SLEEP_MARGIN:-15}
+node_stdout_dir=${GOSSIPSUB_NODE_STDOUT_DIR:-"${experiment_root%/}/Log"}
+gossip_topic=${GOSSIPSUB_TOPIC:-"gossipsub-smoke"}
+gossip_interval=${GOSSIPSUB_INTERVAL:-5}
+gossip_message_bytes=${GOSSIPSUB_MESSAGE_BYTES:-512}
+connect_timeout=${GOSSIPSUB_CONNECT_TIMEOUT:-30}
 
 case "$sleep_margin" in
-    ''|*[!0-9]*) die "PANDAS_SLEEP_MARGIN must be an integer number of seconds, got '$sleep_margin'" ;;
+    ''|*[!0-9]*) die "GOSSIPSUB_SLEEP_MARGIN must be an integer number of seconds, got '$sleep_margin'" ;;
+esac
+case "$gossip_interval" in
+    ''|*[!0-9]*) die "GOSSIPSUB_INTERVAL must be an integer number of seconds, got '$gossip_interval'" ;;
+esac
+case "$gossip_message_bytes" in
+    ''|*[!0-9]*) die "GOSSIPSUB_MESSAGE_BYTES must be an integer number of bytes, got '$gossip_message_bytes'" ;;
+esac
+case "$connect_timeout" in
+    ''|*[!0-9]*) die "GOSSIPSUB_CONNECT_TIMEOUT must be an integer number of seconds, got '$connect_timeout'" ;;
 esac
 
 [ -d "$source_dir" ] || die "source directory does not exist: $source_dir"
@@ -75,7 +72,7 @@ mkdir -p "$log_directory" "$node_stdout_dir" || die "failed to create output dir
 [ -d "$log_directory" ] || die "log directory does not exist: $log_directory"
 [ -d "$node_stdout_dir" ] || die "node stdout directory does not exist: $node_stdout_dir"
 
-echo "========== Launch GossipSub/PANDAS =========="
+echo "========== Launch GossipSub =========="
 echo "local_ip=${local_ip}"
 echo "duration=${duration}s"
 echo "source_dir=${source_dir}"
@@ -104,8 +101,7 @@ started=0
 while IFS= read -r line || [ -n "$line" ]; do
     [ -n "$line" ] || continue
 
-    IFS=',' read -r nick port udp_port ip _rest <<< "$line"
-    node_type=${line##*,}
+    IFS=',' read -r nick port _csv_udp_port ip _csv_multiaddr _csv_role <<< "$line"
 
     if [ "$ip" != "$local_ip" ]; then
         continue
@@ -115,16 +111,18 @@ while IFS= read -r line || [ -n "$line" ]; do
     [ -f "$key_file" ] || die "key file does not exist for ${nick} at ${ip}: $key_file"
 
     "$binary_path" \
-        -UDPport="$udp_port" \
         -duration="$duration" \
         -ip="$ip" \
         -port="$port" \
-        -nodeType="$node_type" \
         -debug=true \
         -nick="${nick}-${ip}" \
         -key="$key_file" \
         -log="$log_directory" \
         -node="$topo_file" \
+        -gossipTopic="$gossip_topic" \
+        -gossipInterval="$gossip_interval" \
+        -gossipMessageBytes="$gossip_message_bytes" \
+        -connTimeout="$connect_timeout" \
         >> "${node_stdout_dir}/${ip}-${nick}.txt" 2>&1 &
     started=$((started + 1))
 done < "$topo_file"

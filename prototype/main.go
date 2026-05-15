@@ -1,349 +1,256 @@
 package main
 
 import (
-	//"context"
 	"context"
+	"encoding/csv"
 	"flag"
 	"fmt"
-	"io"
 	"log"
-	"math/big"
-	"net"
 	"os"
-	"strconv"
-	"sync"
+	"path/filepath"
 	"time"
 
-	"github.com/libp2p-das/sample"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/multiformats/go-multiaddr"
-	//QUIC implementations:
-	//"github.com/quic-go/quic-go"
 )
 
-const BLOCK_DIM = 512
-const NUM_SAMPLE_COPIES = 1
-const NUM_RANDOM_SAMPLES = 73 // number of random samples
-const NUM_ROWS_TO_SAMPLE = 2  // number of columns to sample
-const NUM_COLS_TO_SAMPLE = 2  // number of rows to sample
-const BLOCK_TIME = 12         // block time = 12 seconds
-const MAX_SAMPLES_PER_PACKET = 20
-const MAX_SAMPLE_REQUESTS_PER_PACKET = 70
-const VOTING_DEADLINE = 4
-
-// Global variables
 type Config struct {
 	IP                 string
 	ListenPort         int
-	ListenUDPPort      int
-	ProtocolID         string
-	NickFlag           string
-	NodeType           string
-	ExperimentDuration int
-	DebugMode          bool
-	PerfMode           bool
+	Nick               string
 	Key                string
-	PeerID             string
 	LogDirectory       string
 	NodeFile           string
-	OpenConnLimit      int
+	ExperimentDuration int
+	Debug              bool
+	Topic              string
+	PublishInterval    int
+	MessageBytes       int
 	ConnectTimeout     int
-    EnableHeaderDis   bool
-}
-var config Config
-var searchTable *SearchTable
-var randomSamplingStarted bool = false
-var blockID int = -1
-var myself *Neighbor
-var currBlock *sample.Block = nil
-var myUDPAddr string = ""
-var BANDWIDTH_LIMIT_BYTES_PER_SEC = 125000000 // 1Gbps in bytes per second
-
-// used to calculate uniform validatorIDs
-var validatorPositions map[string]int
-
-// cached UDP connections
-var udpConnCache = make(map[string]*net.UDPConn)
-
-// Map to optimise peer to samples mapping (NOTE: assumes that mapping is static across blocks)
-var peerToSamples = make(map[string][]int)
-var peerToSamplesBigInt = make(map[string][]big.Int)
-
-// Cached samples that validators/regular nodes store
-var sampleCacheByRow map[string]*sample.Sample
-var sampleCacheByColumn map[string]*sample.Sample
-
-var events []string
-
-var eventMutex sync.Mutex
-var s = NewStorage()
-
-func addEvent(event string) {
-	eventMutex.Lock()
-	events = append(events, event)
-	eventMutex.Unlock()
 }
 
-//var eventLogger *log.Logger
+type StaticPeer struct {
+	Nick string
+	Info *peer.AddrInfo
+}
 
 func main() {
-	//========== Experiment arguments ==========
-	config = Config{}
-	flag.StringVar(&config.IP, "ip", "127.0.0.1", "IP to bind to.")
-	flag.StringVar(&config.NickFlag, "nick", "", "nickname for node")
-	flag.StringVar(&config.NodeType, "nodeType", "builder", "type of node: builder, nonvalidator, validator")
-	flag.BoolVar(&config.DebugMode, "debug", false, "debug mode")
-	flag.BoolVar(&config.PerfMode, "pref", false, "perf")
-    flag.BoolVar(&config.EnableHeaderDis, "HeaderDis", false, "enable (false) or disable (true) gossip header dissemination")
+	config := parseFlags()
 
-    flag.IntVar(&config.ExperimentDuration, "duration", 80, "Experiment duration (in seconds).")
-    flag.StringVar(&config.ProtocolID, "pid", "/pandas/0.1", "Sets a protocol id for stream headers")
-    flag.IntVar(&config.ListenPort, "port", 9000, "Specifies a port number to listen")
-    flag.IntVar(&config.ListenUDPPort, "UDPport", 12000, "Specifies a port number to listen")
-    flag.StringVar(&config.Key, "key", "", "Specify key file to use for the node")
-    flag.StringVar(&config.LogDirectory, "log", "./log/", "log directory")
-    flag.StringVar(&config.NodeFile, "node", "./nodes.csv", "node directory")
-    flag.IntVar(&config.OpenConnLimit, "connLimit", 5000, "Limit on the open connections")
-    flag.IntVar(&config.ConnectTimeout, "connTimeout", 30, "Timeout in connection retries in msec")
-    flag.Parse()
-
-	log.SetPrefix(config.NickFlag + ": ")
-	log.SetFlags(log.Lmicroseconds) //print time in microseconds
-	//ctx := context.Background()
-	log.Printf("Running PANDAS, nickname: %s, type: %s, ip: %s/%d\n", config.NickFlag, config.NodeType, config.IP, config.ListenPort)
-
-	//Generate the block – for now pass network size = 1, but update this later
-	currBlock = sample.NewBlock(blockID, BLOCK_DIM, BLOCK_DIM, 1)
-
-	if !(config.DebugMode) {
-		log.SetOutput(io.Discard)
+	if err := os.MkdirAll(config.LogDirectory, 0o755); err != nil {
+		log.Fatalf("failed to create log directory %s: %v", config.LogDirectory, err)
 	}
-	//log.SetOutput(io.Discard)
-	//========== Initialise pubsub service ==========
-	// create a new libp2p Host
 
-	messageChannel := make(chan Message, 20000)
+	log.SetPrefix(config.Nick + ": ")
+	log.SetFlags(log.Lmicroseconds)
+	if !config.Debug {
+		log.SetOutput(os.Stdout)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	//Create host
-	go makeHostUDP(config, ctx, messageChannel)
 
-	validatorPositions = countValidators(config.NodeFile, config.NickFlag)
-	//FIXME this is a hack to get the peer ID
-	//I wanted to always pass through NewNeigbour in case we change the method of computing the peerID
-	h, err := makeHost(config, ctx)
+	h, err := makeHost(config)
 	if err != nil {
-		log.Println(err)
-		return
+		log.Fatalf("failed to create libp2p host: %v", err)
 	}
-	multiAddrStr := fmt.Sprintf("%s/p2p/%s", h.Addrs()[0], h.ID().String())
-	myUDPAddr = fmt.Sprintf("%s:%d", config.IP, config.ListenUDPPort)
-	multiAddr, err := multiaddr.NewMultiaddr(multiAddrStr)
+	defer h.Close()
+
+	log.Printf("Running GossipSub node nick=%s ip=%s tcp=%d peer=%s topic=%s", config.Nick, config.IP, config.ListenPort, h.ID(), config.Topic)
+
+	pub, err := CreatePubSubWithTopic(h, ctx, config.LogDirectory, config.Nick, config.Topic, config.MessageBytes)
 	if err != nil {
-		log.Println("Error parsing peer address:", err)
-		return
+		log.Fatalf("failed to create GossipSub: %v", err)
 	}
-	//myself = NewNeighbour(h.ID().String(), multiAddr, config.NodeType, false)
-	myself = NewNeighbour(config.NickFlag, h.ID().String(), multiAddr, config.NodeType, false, config.IP, config.ListenUDPPort)
-	log.Printf("my own ID:%s, multiaddr: %s\n", myself.Id, multiAddr)
+	go pub.ReadLoop()
 
-	//global and defined in node.go
-	searchTable = NewSearchTable(myself)
-
-	log.Println("Adding peers from file")
-	for _, peer := range readPeersFromFile(config.NodeFile) {
-		log.Println(peer)
-		searchTable.AddNeighbor(peer)
-	}
-
-	// Set up a stream handler with a closure that has access to the messageChannel
-	h.SetStreamHandler(protocol.ID(config.ProtocolID), func(stream network.Stream) {
-		handleStream(stream, messageChannel)
-	})
-	streamManager := NewPeerStreamManager(config.NickFlag, config.NodeType, h, multiAddrStr, config.ProtocolID, config.OpenConnLimit, time.Duration(config.ConnectTimeout)*time.Millisecond)
-	//log.Printf("%s waiting for 1s for other nodes to get up ", h.ID().String())
-
-	calculateUnhostedSamples(streamManager.myID)
-	go pingRandomPeers(streamManager)
-
-	//channel used to wait for goroutines handling events
-	finished := make(chan bool)
-
-	//Start time for load metrics
-	if config.NodeType == "builder" {
-		time.Sleep(200 * time.Millisecond)
-
-		log.Printf("Builder here...\n")
-
-		go handleEventsBuilder(config.ExperimentDuration, h, messageChannel, streamManager, ctx, finished, config.LogDirectory, config.NickFlag)
-		<-finished
-
-	} else if config.NodeType == "regular" {
-		time.Sleep(4 * time.Second)
-
-		log.Printf("Regular node here...\n")
-
-		go handleEventsRegular(config.ExperimentDuration, h, messageChannel, streamManager, ctx, finished, config.LogDirectory, config.NickFlag)
-		<-finished
-	} else if config.NodeType == "validator" {
-		time.Sleep(1 * time.Second)
-
-		log.Printf("Validator node here...\n")
-
-		go handleEventsValidator(config.ExperimentDuration, h, messageChannel, streamManager, ctx, finished, config.LogDirectory, config.NickFlag)
-		<-finished
-	} else {
-		log.Printf("Error: Invalid node type..\n")
-	}
-	//========== Initialise Logger ==========
-	//Create Log file
-	file, err := os.OpenFile(config.LogDirectory+config.NickFlag+".log", os.O_CREATE|os.O_WRONLY, 0666)
+	peers, err := readStaticPeers(config.NodeFile, h.ID())
 	if err != nil {
-		log.Fatal("Error opening log file:", err)
+		log.Fatalf("failed to read topology: %v", err)
 	}
-	defer file.Close()
-	for event := range events {
-		_, err = file.WriteString(events[event] + "\n")
-		if err != nil {
-			log.Fatal("Error writing to log file:", err)
-		}
+	connectStaticPeers(ctx, h, peers, time.Duration(config.ConnectTimeout)*time.Second)
+
+	if err := runGossip(ctx, pub, config); err != nil {
+		log.Fatalf("GossipSub run failed: %v", err)
 	}
-	log.Println(s.PrintTimeSpentOnMutexes())
-	log.Println("Main done - shutting down")
+
+	log.Printf("GossipSub node done")
 }
 
-func defaultNick(p peer.ID) string {
-	return fmt.Sprintf("%s-%s", os.Getenv("USER"), shortID(p))
+func parseFlags() Config {
+	config := Config{}
+
+	flag.StringVar(&config.IP, "ip", "127.0.0.1", "IP to bind to")
+	flag.IntVar(&config.ListenPort, "port", 9000, "TCP port to listen on")
+	flag.StringVar(&config.Nick, "nick", "", "node nickname")
+	flag.StringVar(&config.Key, "key", "", "private key file")
+	flag.StringVar(&config.LogDirectory, "log", "./log/", "directory for GossipSub trace files")
+	flag.StringVar(&config.NodeFile, "node", "./nodes.csv", "CSV topology file")
+	flag.IntVar(&config.ExperimentDuration, "duration", 80, "experiment duration in seconds")
+	flag.BoolVar(&config.Debug, "debug", false, "print debug logs")
+	flag.StringVar(&config.Topic, "gossipTopic", "gossipsub-smoke", "GossipSub topic")
+	flag.IntVar(&config.PublishInterval, "gossipInterval", 5, "seconds between publishes")
+	flag.IntVar(&config.MessageBytes, "gossipMessageBytes", 512, "GossipSub payload size in bytes")
+	flag.IntVar(&config.ConnectTimeout, "connTimeout", 30, "static peer connection retry window in seconds")
+	flag.Parse()
+
+	if config.Nick == "" {
+		config.Nick = fmt.Sprintf("%s-%d", config.IP, config.ListenPort)
+	}
+	if config.Key == "" {
+		log.Fatal("missing required -key")
+	}
+	if config.ExperimentDuration <= 0 {
+		log.Fatal("-duration must be positive")
+	}
+	if config.PublishInterval <= 0 {
+		log.Fatal("-gossipInterval must be positive")
+	}
+	if config.MessageBytes < 0 {
+		log.Fatal("-gossipMessageBytes must be zero or positive")
+	}
+	if config.ConnectTimeout <= 0 {
+		log.Fatal("-connTimeout must be positive")
+	}
+
+	return config
 }
 
-func shortID(p peer.ID) string {
-	pretty := p.ShortString()
-	return pretty[len(pretty)-8:]
-}
-
-/*
-func getPeerIDFromKey(config Config) (peer.ID, error) {
-    // Get the RSA key for the node.
-    privBytes, err := os.ReadFile(config.Key)
-    priv, err := crypto.UnmarshalPrivateKey(privBytes)
-    if err != nil {
-        return nil, err
-    }
-
-    // Get peer ID from public key
-    peerID, err := peer.IDFromPublicKey(libp2pPrivKey.GetPublic())
-    if err != nil {
-        fmt.Println("Error generating peer ID:", err)
-        return nil, err
-    }
-
-    return peerID, nil
-
-}*/
-
-func makeHost(config Config, ctx context.Context) (host.Host, error) {
-	// Get the RSA key for the node.
+func makeHost(config Config) (host.Host, error) {
 	privBytes, err := os.ReadFile(config.Key)
-	priv, err := crypto.UnmarshalPrivateKey(privBytes)
-	if err != nil {
-		panic(err)
-	}
-
-	tcpAddrString := fmt.Sprintf("/ip4/%s/tcp/%d", config.IP, config.ListenPort)
-	//quicAddrString := fmt.Sprintf("/ip4/%s/udp/%d/quic", config.IP, config.ListenPort)
-
-	/*
-	   connmgr, err := connmgr.NewConnManager(
-	       5000,    // Lowwater
-	       3000000, // HighWater,
-	       connmgr.WithGracePeriod(10*time.Minute),
-	   )*/
-
-	h, err := libp2p.New(
-		// Use the keypair we generated
-		libp2p.Identity(priv),
-		// Multiple listen addresses
-		libp2p.ListenAddrStrings(
-			tcpAddrString, // regular tcp connections
-			//quicAddrString, // a UDP endpoint for the QUIC transport
-		),
-		libp2p.DisableMetrics(),
-		libp2p.NoSecurity,
-		libp2p.DisableRelay(),
-		//libp2p.ConnectionManager(connmgr),
-		//libp2p.NATPortMap(),
-		//libp2p.EnableNATService(),
-	)
-
-	/*
-	   h, err := libp2p.New(
-	       // Use the keypair we generated
-	       libp2p.Identity(priv),
-	       // Multiple listen addresses
-	       libp2p.ListenAddrStrings(
-	            tcpAddrString, // regular tcp connections
-	       //     //quicAddrString, // a UDP endpoint for the QUIC transport
-	       ),
-	       // libp2p.NATPortMap(),
-	       // libp2p.EnableNATService(),
-	       libp2p.ConnectionManager(connmgr.NewConnManager(
-	           -1,       // MaxConcurrentStreamsPerConnection: Unlimited concurrent streams per connection
-	           -1,       // MaxConnections: Unlimited connections
-	           0,        // GracePeriod: No grace period (immediate removal of idle connections)
-	       )),
-	   )*/
-
 	if err != nil {
 		return nil, err
 	}
 
-	// libp2p.New constructs a new libp2p Host.
-	// Other options can be added here.
-	return h, err
+	priv, err := crypto.UnmarshalPrivateKey(privBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	listenAddr := fmt.Sprintf("/ip4/%s/tcp/%d", config.IP, config.ListenPort)
+	return libp2p.New(
+		libp2p.Identity(priv),
+		libp2p.ListenAddrStrings(listenAddr),
+		libp2p.DisableRelay(),
+	)
 }
 
-func makeHostUDP(config Config, ctx context.Context, messageChannel chan<- Message) error {
-	addr := net.JoinHostPort(config.IP, strconv.Itoa(config.ListenUDPPort))
-
-	// Start UDP server
-	conn, err := net.ListenPacket("udp", addr)
+func readStaticPeers(path string, ownID peer.ID) ([]StaticPeer, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		log.Println("Error listening: ", err)
-		return err
+		return nil, err
 	}
-	defer conn.Close()
+	defer file.Close()
 
-	buffer := make([]byte, 4096)
+	records, err := csv.NewReader(file).ReadAll()
+	if err != nil {
+		return nil, err
+	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			// Read incoming messages
-			n, _, err := conn.ReadFrom(buffer)
+	peers := make([]StaticPeer, 0, len(records))
+	for row, record := range records {
+		if len(record) != 6 {
+			return nil, fmt.Errorf("invalid topology row %d: expected 6 columns, got %d", row+1, len(record))
+		}
+
+		addr, err := multiaddr.NewMultiaddr(record[4])
+		if err != nil {
+			return nil, fmt.Errorf("invalid multiaddr at row %d: %w", row+1, err)
+		}
+
+		info, err := peer.AddrInfoFromP2pAddr(addr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid peer info at row %d: %w", row+1, err)
+		}
+		if info.ID == ownID {
+			continue
+		}
+
+		peers = append(peers, StaticPeer{
+			Nick: record[0],
+			Info: info,
+		})
+	}
+
+	return peers, nil
+}
+
+func connectStaticPeers(ctx context.Context, h host.Host, peers []StaticPeer, timeout time.Duration) {
+	pending := make(map[peer.ID]StaticPeer, len(peers))
+	for _, staticPeer := range peers {
+		pending[staticPeer.Info.ID] = staticPeer
+	}
+
+	if len(pending) == 0 {
+		log.Printf("No static peers to connect")
+		return
+	}
+
+	deadline := time.Now().Add(timeout)
+	for len(pending) > 0 && time.Now().Before(deadline) {
+		for id, staticPeer := range pending {
+			connectCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			err := h.Connect(connectCtx, *staticPeer.Info)
+			cancel()
 			if err != nil {
-				log.Println("Error receiving message:", err)
+				log.Printf("Static peer connect failed nick=%s peer=%s: %v", staticPeer.Nick, id, err)
 				continue
 			}
+			log.Printf("Connected static peer nick=%s peer=%s", staticPeer.Nick, id)
+			delete(pending, id)
+		}
 
-			// Make a copy of the message data
-			completeMessage := make([]byte, n)
-			copy(completeMessage, buffer[:n])
-
-			// Check if the complete message is not empty
-			/*
-			   if len(completeMessage) == 0 {
-			       continue
-			   }*/
-
-			// Handle the complete message
-			go handleMessageUDP(completeMessage, messageChannel)
+		if len(pending) > 0 {
+			time.Sleep(1 * time.Second)
 		}
 	}
+
+	if len(pending) > 0 {
+		log.Printf("Continuing with %d unconnected static peers", len(pending))
+	}
+}
+
+func runGossip(ctx context.Context, pub *GossipPubSub, config Config) error {
+	duration := time.Duration(config.ExperimentDuration) * time.Second
+	interval := time.Duration(config.PublishInterval) * time.Second
+
+	publishTicker := time.NewTicker(interval)
+	defer publishTicker.Stop()
+
+	endTimer := time.NewTimer(duration)
+	defer endTimer.Stop()
+
+	time.Sleep(2 * time.Second)
+	publishID := 0
+
+	publish := func() {
+		if err := pub.Publish(publishID); err != nil {
+			log.Printf("GossipSub publish failed message=%d: %v", publishID, err)
+		}
+		publishID++
+	}
+
+	publish()
+	for {
+		select {
+		case <-endTimer.C:
+			return nil
+		case <-publishTicker.C:
+			publish()
+		case msg, ok := <-pub.Messages:
+			if !ok {
+				return nil
+			}
+			log.Printf("GossipSub message received sender=%s sequence=%d bytes=%d", msg.SenderID, msg.Sequence, len(msg.Payload))
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func tracePath(logDir string, nick string) string {
+	return filepath.Join(logDir, nick+".trace")
 }

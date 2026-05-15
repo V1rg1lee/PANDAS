@@ -1,82 +1,147 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-# Bash Script to launch Gossipsub PANDAS
-# ========== Prerequisites Install ==========
-# Install experiment on the grid5000 node for better disk usage
-topo_file=$1
-binary_path="./libp2p-das"
-num_blocks=$2
-key_directory=$3
-log_directory=$4
-duration=$6
-login=$7
-builder_ip=$8
-log_file=$9
-#!/bin/bash
+# Launch a GossipSub/PANDAS node process on the current Grid5000 host.
+#
+# Arguments kept for compatibility with experiment_launch.py:
+#   1 topology CSV
+#   2 num_blocks      (currently unused by libp2p-das)
+#   3 key directory
+#   4 log directory   (passed to libp2p-das -log and used for sar logs)
+#   5 local IP        (the IP for this Grid5000 host)
+#   6 duration        (seconds)
+#   7 Grid5000 login
+#   8 builder_ip      (currently unused by libp2p-das)
+#   9 experiment root (used for per-node stdout under Log/)
+#
+# Optional for the first validation run:
+#   tc_config.py and tracer.sh are not invoked here. Run them separately only
+#   when latency shaping or pubsub tracing is needed.
 
-# Bash Script to launch Gossipsub PANDAS
-# ========== Prerequisites Install ==========
-echo "========== Prerequisites Install =========="
-# Install experiment on the grid5000 node for better disk usage
-cd /tmp
-sudo-g5k
-# Install Go
-wget "https://go.dev/dl/go1.21.6.linux-amd64.tar.gz"
-sudo tar -C /usr/local -xzf go1.21.6.linux-amd64.tar.gz
-export PATH=$PATH:/usr/local/go/bin
-# Clone experiment code
-cp -r /home/${login}/PANDAS /tmp/
-cd /tmp
-cd PANDAS
+usage() {
+    echo "Usage: $0 <topology.csv> <num_blocks-unused> <key_dir> <log_dir> <local_ip> <duration_s> <login> <builder_ip-unused> <experiment_root>" >&2
+}
 
-ip=$5
-echo ${ip}
-systemctl start sysstat
-sar -A -o ${log_directory}/sar_logs_${ip} 1 $exp_duration >/dev/null 2>&1 &
-sleep 1
+die() {
+    echo "run.sh: $*" >&2
+    exit 1
+}
 
-#sudo apt install tcpdump
-#sudo tcpdump -i any -w /home/${login}/results/PANDAS-Gossip--b1-v200-nv799-prs512/Log/${ip}.pcap &
-#tc qdisc del dev <interface_name> root
-cd /tmp/PANDAS
-#check if we got an argument
-if [ $# -eq 0 ]; then
-    echo "Provide a topology file as an argument"
+if [ "$#" -lt 9 ]; then
+    usage
     exit 1
 fi
 
-# Read topo file line by line
-bootstrap_node=`grep ",bootstrap" ${topo_file} | cut -d',' -f4`
+topo_file=$1
+num_blocks=$2
+key_directory=$3
+log_directory=$4
+local_ip=$5
+duration=$6
+login=$7
+builder_ip=$8
+experiment_root=$9
 
-while IFS= read -r line
-do
-    nick=`echo "$line" | cut -d',' -f1`
-    port=`echo "$line" | cut -d',' -f2`
-    udp_port=`echo "$line" | cut -d',' -f3`
-    ip=`echo "$line" | cut -d',' -f4`
-    node_type=$(echo "$line" | rev | cut -d',' -f1 | rev)
-    node_ip=$(ip -o -4 addr show scope global | awk '!/^[0-9]+: lo:/ {print $4}' | cut -d '/' -f 1)
-    if [[ "$ip" == "$node_ip" ]]; then
-        $binary_path -UDPport=${udp_port} -duration=${duration} -ip=${ip} -port=${port} -nodeType=${node_type} -debug=true -nick=${nick}-${ip} -key=${key_directory}${ip}-${nick}.key -log=${log_directory} -node=${topo_file} >> ${9}/Log/${ip}-${nick}.txt 2>&1&
-        if [ $? -ne 0 ]; then
-            echo "Error running $nick"
-            exit 1
-        fi
+# Compatibility-only values. They document the legacy argument contract without
+# pretending to configure the current binary.
+: "$num_blocks" "$builder_ip"
+
+case "$duration" in
+    ''|*[!0-9]*) die "duration must be an integer number of seconds, got '$duration'" ;;
+esac
+
+[ -f "$topo_file" ] || die "topology file does not exist: $topo_file"
+[ -d "$key_directory" ] || die "key directory does not exist: $key_directory"
+[ -n "$login" ] || die "login must not be empty"
+[ -n "$local_ip" ] || die "local IP must not be empty"
+
+source_dir=${PANDAS_SOURCE_DIR:-"/home/${login}/PANDAS"}
+work_dir=${PANDAS_WORK_DIR:-"/tmp/PANDAS"}
+binary_path=${PANDAS_BINARY_PATH:-"${work_dir}/libp2p-das"}
+sleep_margin=${PANDAS_SLEEP_MARGIN:-15}
+node_stdout_dir=${PANDAS_NODE_STDOUT_DIR:-"${experiment_root%/}/Log"}
+
+case "$sleep_margin" in
+    ''|*[!0-9]*) die "PANDAS_SLEEP_MARGIN must be an integer number of seconds, got '$sleep_margin'" ;;
+esac
+
+[ -d "$source_dir" ] || die "source directory does not exist: $source_dir"
+
+if [ ! -f "${source_dir}/go.mod" ] && [ -f "${source_dir}/prototype/go.mod" ]; then
+    source_dir="${source_dir}/prototype"
+fi
+
+mkdir -p "$log_directory" "$node_stdout_dir" || die "failed to create output directories"
+[ -d "$log_directory" ] || die "log directory does not exist: $log_directory"
+[ -d "$node_stdout_dir" ] || die "node stdout directory does not exist: $node_stdout_dir"
+
+echo "========== Launch GossipSub/PANDAS =========="
+echo "local_ip=${local_ip}"
+echo "duration=${duration}s"
+echo "source_dir=${source_dir}"
+echo "work_dir=${work_dir}"
+
+if [ "$source_dir" != "$work_dir" ]; then
+    mkdir -p "$work_dir" || die "failed to create work directory: $work_dir"
+    cp -a "${source_dir%/}/." "$work_dir/" || die "failed to copy source into work directory"
+fi
+
+cd "$work_dir"
+[ -x "$binary_path" ] || die "expected executable binary does not exist: $binary_path"
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl start sysstat >/dev/null 2>&1 || true
+fi
+
+if command -v sar >/dev/null 2>&1; then
+    sar -A -o "${log_directory%/}/sar_logs_${local_ip}" 1 "$duration" >/dev/null 2>&1 &
+else
+    echo "run.sh: sar not found; continuing without sysstat capture" >&2
+fi
+
+started=0
+
+while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+
+    IFS=',' read -r nick port udp_port ip _rest <<< "$line"
+    node_type=${line##*,}
+
+    if [ "$ip" != "$local_ip" ]; then
+        continue
     fi
 
-done < $topo_file
+    key_file="${key_directory%/}/${ip}-${nick}.key"
+    [ -f "$key_file" ] || die "key file does not exist for ${nick} at ${ip}: $key_file"
 
-sleep 600
-FAIL=0
-# Wait for the nodes to finish
-for job in `jobs -p`
-do
-    wait $job || $FAIL="Fail"
+    "$binary_path" \
+        -UDPport="$udp_port" \
+        -duration="$duration" \
+        -ip="$ip" \
+        -port="$port" \
+        -nodeType="$node_type" \
+        -debug=true \
+        -nick="${nick}-${ip}" \
+        -key="$key_file" \
+        -log="$log_directory" \
+        -node="$topo_file" \
+        >> "${node_stdout_dir}/${ip}-${nick}.txt" 2>&1 &
+    started=$((started + 1))
+done < "$topo_file"
+
+[ "$started" -gt 0 ] || die "no topology rows matched local IP ${local_ip}"
+
+sleep $((duration + sleep_margin))
+
+fail=0
+for job in $(jobs -p); do
+    if ! wait "$job"; then
+        fail=1
+    fi
 done
 
-if [ "$FAIL" == "0" ];
-then
-    echo "All jobes finished successfully" 1>&2
+if [ "$fail" -eq 0 ]; then
+    echo "All jobs finished successfully" >&2
 else
-    echo "Some jobs failed $FAIL" 1>&2
+    die "some jobs failed"
 fi

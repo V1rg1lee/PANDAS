@@ -62,7 +62,7 @@ This writes:
 - `metrics/node_degree_timeseries.csv`: per-node in/out/total directed degree per heartbeat;
 - `metrics/degree_timeseries.csv`: degree distribution summary per heartbeat;
 - `metrics/churn_timeseries.csv`: added/removed edges, churn, and Jaccard stability;
-- `metrics/control_timeseries.csv`: GRAFT/PRUNE/IHAVE/IWANT/publish/delivery/RPC counters;
+- `metrics/control_timeseries.csv`: one row per heartbeat bucket with GRAFT/PRUNE/IHAVE/IWANT/publish/delivery/RPC counters;
 - `metrics/global_graph_timeseries.csv`: density, components, clustering, reciprocity, path metrics when feasible;
 - `metrics/edge_lifetimes_from_snapshots.csv`: reconstructed edge lifetimes from snapshot changes;
 - `metrics/convergence_metrics.json`: heuristic stabilization indicators;

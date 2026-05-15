@@ -171,7 +171,7 @@ def analyze_snapshots_file(snapshots_csv: Path, out_dir: Path) -> None:
     write_node_degree_timeseries(out_dir / "node_degree_timeseries.csv", snapshots, all_nodes)
     write_degree_timeseries(out_dir / "degree_timeseries.csv", snapshots, all_nodes)
     write_churn_timeseries(out_dir / "churn_timeseries.csv", snapshots)
-    write_control_timeseries(out_dir / "control_timeseries.csv", snapshots_csv)
+    write_control_timeseries(out_dir / "control_timeseries.csv", snapshots_csv, snapshots)
     write_global_timeseries(out_dir / "global_graph_timeseries.csv", snapshots, all_nodes)
 
     union_edges = set().union(*(snapshot.edges for snapshot in snapshots))
@@ -385,45 +385,48 @@ def write_churn_timeseries(path: Path, snapshots: list[Snapshot]) -> None:
     ])
 
 
-def write_control_timeseries(path: Path, snapshots_csv: Path) -> None:
+def write_control_timeseries(path: Path, snapshots_csv: Path, snapshots: list[Snapshot]) -> None:
+    fieldnames = [
+        "timestamp",
+        "heartbeat_index",
+        "heartbeat_count",
+        "inferred_bucket_count",
+        "graft_count",
+        "prune_count",
+        "rpc_graft_count",
+        "rpc_prune_count",
+        "ihave_count",
+        "iwant_count",
+        "publish_count",
+        "deliver_count",
+        "send_rpc_count",
+        "recv_rpc_count",
+    ]
     trace_events_path = snapshots_csv.parent / "trace_events.csv"
     if not trace_events_path.exists():
-        write_rows(path, [], [
-            "timestamp",
-            "heartbeat_index",
-            "graft_count",
-            "prune_count",
-            "rpc_graft_count",
-            "rpc_prune_count",
-            "ihave_count",
-            "iwant_count",
-            "publish_count",
-            "deliver_count",
-            "send_rpc_count",
-            "recv_rpc_count",
-        ])
+        rows = [empty_control_row(snapshot) for snapshot in snapshots]
+        write_rows(path, rows, fieldnames)
         return
 
     counters: dict[int, Counter[str]] = defaultdict(Counter)
-    timestamps: dict[int, int] = {}
     with trace_events_path.open() as handle:
         reader = csv.DictReader(handle)
         for row in reader:
             heartbeat = int(row["heartbeat_index"])
             event = row["event"]
             counters[heartbeat][event] += 1
-            timestamp = int(row["timestamp"])
-            timestamps[heartbeat] = min(timestamps.get(heartbeat, timestamp), timestamp)
             if event in {"sendRPC", "recvRPC"}:
                 for key in ["graft_count", "prune_count", "ihave_count", "iwant_count"]:
                     counters[heartbeat][f"rpc_{key}"] += int(row.get(key, 0) or 0)
 
     rows = []
-    for heartbeat in sorted(counters):
-        counter = counters[heartbeat]
+    for snapshot in snapshots:
+        counter = counters[snapshot.heartbeat_index]
         rows.append({
-            "timestamp": timestamps.get(heartbeat, ""),
-            "heartbeat_index": heartbeat,
+            "timestamp": snapshot.timestamp,
+            "heartbeat_index": snapshot.heartbeat_index,
+            "heartbeat_count": counter["heartbeat"],
+            "inferred_bucket_count": 0 if counter["heartbeat"] else 1,
             "graft_count": counter["graft"],
             "prune_count": counter["prune"],
             "rpc_graft_count": counter["rpc_graft_count"],
@@ -435,20 +438,26 @@ def write_control_timeseries(path: Path, snapshots_csv: Path) -> None:
             "send_rpc_count": counter["sendRPC"],
             "recv_rpc_count": counter["recvRPC"],
         })
-    write_rows(path, rows, [
-        "timestamp",
-        "heartbeat_index",
-        "graft_count",
-        "prune_count",
-        "rpc_graft_count",
-        "rpc_prune_count",
-        "ihave_count",
-        "iwant_count",
-        "publish_count",
-        "deliver_count",
-        "send_rpc_count",
-        "recv_rpc_count",
-    ])
+    write_rows(path, rows, fieldnames)
+
+
+def empty_control_row(snapshot: Snapshot) -> dict[str, Any]:
+    return {
+        "timestamp": snapshot.timestamp,
+        "heartbeat_index": snapshot.heartbeat_index,
+        "heartbeat_count": 0,
+        "inferred_bucket_count": 1,
+        "graft_count": 0,
+        "prune_count": 0,
+        "rpc_graft_count": 0,
+        "rpc_prune_count": 0,
+        "ihave_count": 0,
+        "iwant_count": 0,
+        "publish_count": 0,
+        "deliver_count": 0,
+        "send_rpc_count": 0,
+        "recv_rpc_count": 0,
+    }
 
 
 def write_global_timeseries(path: Path, snapshots: list[Snapshot], nodes: set[str]) -> None:

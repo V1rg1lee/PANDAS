@@ -34,15 +34,30 @@ def main() -> None:
     args = parse_args()
     trace_dir = Path(args.trace_dir)
     out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if not trace_dir.is_dir():
+        raise SystemExit(f"trace directory does not exist: {trace_dir}")
+    if args.nodes_file and not Path(args.nodes_file).is_file():
+        raise SystemExit(f"nodes file does not exist: {args.nodes_file}")
+    if str(out_dir) == "/topology":
+        raise SystemExit(
+            "refusing to write to /topology. Your shell variable EXP is probably empty; "
+            "run `echo \"$EXP\"` and re-define EXP/RESULTS/NODES before extracting."
+        )
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError as exc:
+        raise SystemExit(
+            f"cannot create output directory {out_dir}: permission denied. "
+            "Check that EXP is set to your experiment directory."
+        ) from exc
 
     traces = sorted(trace_dir.glob(args.trace_glob))
     if not traces:
         raise SystemExit(f"no trace files matched {trace_dir / args.trace_glob}")
 
     peer_alias = trace_peer_aliases(traces)
-    if args.nodes_file:
-        peer_alias.update(load_peer_aliases(Path(args.nodes_file)))
+    node_count_from_file = count_nodes(Path(args.nodes_file)) if args.nodes_file else None
 
     mesh_events: list[dict[str, Any]] = []
     peer_events: list[dict[str, Any]] = []
@@ -120,20 +135,55 @@ def main() -> None:
 
     final_edges = sorted(mesh_edges, key=lambda e: (e.topic, e.source, e.target))
     all_seen_edges = sorted(max_mesh_edges, key=lambda e: (e.topic, e.source, e.target))
+    all_peers = set(peer_alias.keys())
+    all_peers.update(peer for edge in [*final_edges, *all_seen_edges] for peer in [edge.source, edge.target])
+
+    final_undirected_edges = directed_to_undirected(final_edges)
+    seen_undirected_edges = directed_to_undirected(all_seen_edges)
+
     write_edge_rows(out_dir / "mesh_final_edges.csv", final_edges, peer_alias)
     write_edge_rows(out_dir / "mesh_seen_edges.csv", all_seen_edges, peer_alias)
+    write_undirected_edge_rows(out_dir / "mesh_final_edges_undirected.csv", final_undirected_edges, peer_alias)
+    write_undirected_edge_rows(out_dir / "mesh_seen_edges_undirected.csv", seen_undirected_edges, peer_alias)
 
-    final_degrees = degree_rows(final_edges, peer_alias)
-    seen_degrees = degree_rows(all_seen_edges, peer_alias)
+    final_degrees = degree_rows(final_edges, peer_alias, all_peers)
+    seen_degrees = degree_rows(all_seen_edges, peer_alias, all_peers)
+    final_undirected_degrees = undirected_degree_rows(final_undirected_edges, peer_alias, all_peers)
+    seen_undirected_degrees = undirected_degree_rows(seen_undirected_edges, peer_alias, all_peers)
     write_rows(out_dir / "mesh_final_degrees.csv", final_degrees, ["peer", "alias", "out_degree", "in_degree", "total_degree"])
     write_rows(out_dir / "mesh_seen_degrees.csv", seen_degrees, ["peer", "alias", "out_degree", "in_degree", "total_degree"])
+    write_rows(out_dir / "mesh_final_degrees_undirected.csv", final_undirected_degrees, ["peer", "alias", "degree"])
+    write_rows(out_dir / "mesh_seen_degrees_undirected.csv", seen_undirected_degrees, ["peer", "alias", "degree"])
+
+    graph_stats = [
+        topology_stats("final_directed", final_edges, all_peers, directed=True),
+        topology_stats("seen_directed", all_seen_edges, all_peers, directed=True),
+        topology_stats("final_undirected", final_undirected_edges, all_peers, directed=False),
+        topology_stats("seen_undirected", seen_undirected_edges, all_peers, directed=False),
+    ]
+    write_rows(out_dir / "graph_stats.csv", graph_stats, [
+        "name",
+        "directed",
+        "node_count",
+        "edge_count",
+        "density",
+        "min_degree",
+        "avg_degree",
+        "max_degree",
+        "component_count",
+        "largest_component_size",
+    ])
 
     summary = {
         "trace_files": [str(path) for path in traces],
         "event_counts": dict(sorted(event_counts.items())),
         "mesh_final_edge_count": len(final_edges),
+        "mesh_final_undirected_edge_count": len(final_undirected_edges),
         "mesh_seen_edge_count": len(all_seen_edges),
-        "peer_alias_count": len(peer_alias),
+        "mesh_seen_undirected_edge_count": len(seen_undirected_edges),
+        "node_count_from_traces": len(peer_alias),
+        "node_count_from_nodes_file": node_count_from_file,
+        "graph_stats": graph_stats,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
@@ -183,17 +233,9 @@ def classify_event(event: dict[str, Any]) -> str:
     return f"type_{event.get('type', 'unknown')}"
 
 
-def load_peer_aliases(path: Path) -> dict[str, str]:
-    aliases: dict[str, str] = {}
+def count_nodes(path: Path) -> int:
     with path.open() as handle:
-        reader = csv.reader(handle)
-        for record in reader:
-            if len(record) != 6:
-                continue
-            nick, _tcp_port, _udp_port, ip, multiaddr, _role = record
-            peer_id = multiaddr.rsplit("/p2p/", 1)[-1]
-            aliases[peer_id] = f"{nick}-{ip}"
-    return aliases
+        return sum(1 for record in csv.reader(handle) if len(record) == 6)
 
 
 def trace_peer_aliases(paths: list[Path]) -> dict[str, str]:
@@ -296,15 +338,35 @@ def write_edge_rows(path: Path, edges: list[Edge], aliases: dict[str, str]) -> N
     write_rows(path, rows, ["topic", "source_peer", "source_alias", "target_peer", "target_alias"])
 
 
-def degree_rows(edges: list[Edge], aliases: dict[str, str]) -> list[dict[str, Any]]:
+def write_undirected_edge_rows(path: Path, edges: list[Edge], aliases: dict[str, str]) -> None:
+    rows = [
+        {
+            "topic": edge.topic,
+            "peer_a": edge.source,
+            "alias_a": aliases.get(edge.source, ""),
+            "peer_b": edge.target,
+            "alias_b": aliases.get(edge.target, ""),
+        }
+        for edge in edges
+    ]
+    write_rows(path, rows, ["topic", "peer_a", "alias_a", "peer_b", "alias_b"])
+
+
+def directed_to_undirected(edges: list[Edge]) -> list[Edge]:
+    undirected = {
+        Edge(min(edge.source, edge.target), max(edge.source, edge.target), edge.topic)
+        for edge in edges
+        if edge.source != edge.target
+    }
+    return sorted(undirected, key=lambda e: (e.topic, e.source, e.target))
+
+
+def degree_rows(edges: list[Edge], aliases: dict[str, str], peers: set[str]) -> list[dict[str, Any]]:
     out_degree: Counter[str] = Counter()
     in_degree: Counter[str] = Counter()
-    peers = set()
     for edge in edges:
         out_degree[edge.source] += 1
         in_degree[edge.target] += 1
-        peers.add(edge.source)
-        peers.add(edge.target)
 
     return [
         {
@@ -316,6 +378,86 @@ def degree_rows(edges: list[Edge], aliases: dict[str, str]) -> list[dict[str, An
         }
         for peer in sorted(peers)
     ]
+
+
+def undirected_degree_rows(edges: list[Edge], aliases: dict[str, str], peers: set[str]) -> list[dict[str, Any]]:
+    degree: Counter[str] = Counter()
+    for edge in edges:
+        degree[edge.source] += 1
+        degree[edge.target] += 1
+
+    return [
+        {
+            "peer": peer,
+            "alias": aliases.get(peer, ""),
+            "degree": degree[peer],
+        }
+        for peer in sorted(peers)
+    ]
+
+
+def topology_stats(name: str, edges: list[Edge], peers: set[str], directed: bool) -> dict[str, Any]:
+    node_count = len(peers)
+    edge_count = len(edges)
+    if node_count <= 1:
+        density = 0.0
+    elif directed:
+        density = edge_count / (node_count * (node_count - 1))
+    else:
+        density = edge_count / (node_count * (node_count - 1) / 2)
+
+    if directed:
+        degree_values = [
+            sum(1 for edge in edges if edge.source == peer) + sum(1 for edge in edges if edge.target == peer)
+            for peer in peers
+        ]
+    else:
+        degree_counter: Counter[str] = Counter()
+        for edge in edges:
+            degree_counter[edge.source] += 1
+            degree_counter[edge.target] += 1
+        degree_values = [degree_counter[peer] for peer in peers]
+
+    components = connected_components(peers, directed_to_undirected(edges) if directed else edges)
+    largest_component_size = max((len(component) for component in components), default=0)
+
+    return {
+        "name": name,
+        "directed": int(directed),
+        "node_count": node_count,
+        "edge_count": edge_count,
+        "density": f"{density:.6f}",
+        "min_degree": min(degree_values, default=0),
+        "avg_degree": f"{(sum(degree_values) / node_count) if node_count else 0:.6f}",
+        "max_degree": max(degree_values, default=0),
+        "component_count": len(components),
+        "largest_component_size": largest_component_size,
+    }
+
+
+def connected_components(peers: set[str], undirected_edges: list[Edge]) -> list[set[str]]:
+    adjacency: dict[str, set[str]] = {peer: set() for peer in peers}
+    for edge in undirected_edges:
+        adjacency.setdefault(edge.source, set()).add(edge.target)
+        adjacency.setdefault(edge.target, set()).add(edge.source)
+
+    seen: set[str] = set()
+    components: list[set[str]] = []
+    for peer in sorted(adjacency):
+        if peer in seen:
+            continue
+        stack = [peer]
+        component: set[str] = set()
+        seen.add(peer)
+        while stack:
+            current = stack.pop()
+            component.add(current)
+            for neighbor in adjacency[current]:
+                if neighbor not in seen:
+                    seen.add(neighbor)
+                    stack.append(neighbor)
+        components.append(component)
+    return components
 
 
 def write_rows(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:

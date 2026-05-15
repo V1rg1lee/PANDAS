@@ -314,6 +314,12 @@ Search for positive indicators:
 Extract topology data:
 ```sh
     cd "$SRC"
+
+    echo "EXP=$EXP"
+    echo "RESULTS=$RESULTS"
+    echo "NODES=$NODES"
+    test -n "$EXP" && test -n "$RESULTS" && test -n "$NODES"
+
     python3 analysis/extract_gossipsub_topology.py \
       "$RESULTS" \
       --nodes-file "$NODES" \
@@ -325,7 +331,10 @@ Check extracted topology files:
     find "$EXP/topology" -type f | sort
     cat "$EXP/topology/summary.json"
     cat "$EXP/topology/mesh_final_edges.csv"
+    cat "$EXP/topology/mesh_final_edges_undirected.csv"
     cat "$EXP/topology/mesh_final_degrees.csv"
+    cat "$EXP/topology/mesh_final_degrees_undirected.csv"
+    cat "$EXP/topology/graph_stats.csv"
 ```
 
 A successful smoke test should show:

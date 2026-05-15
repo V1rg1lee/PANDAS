@@ -50,5 +50,6 @@ If you want to delete the experiment results, also remove the experiment directo
 
 If there are still jobs running, you can cancel them with:
 ```sh
-    oarstat -u | grep "$LOGIN" | awk '{print $1}' | xargs -n 1 oardel
+    oarstat -u
+    oarkill <job_id>
 ```

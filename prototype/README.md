@@ -40,3 +40,24 @@ Use:
 ```sh
 Launching_scripts/grid5000_smoke_test_gossipsub.md
 ```
+
+## Trace Analysis
+
+After a run, extract mesh and traffic CSVs from the GossipSub traces with:
+
+```sh
+python3 analysis/extract_gossipsub_topology.py \
+  "$RESULTS" \
+  --nodes-file "$NODES" \
+  --out-dir "$EXP/topology"
+```
+
+The extractor writes:
+
+- `mesh_events.csv`: ordered `graft`/`prune` events;
+- `mesh_final_edges.csv`: final directed mesh edges;
+- `mesh_seen_edges.csv`: all directed mesh edges ever observed;
+- `mesh_final_degrees.csv` and `mesh_seen_degrees.csv`;
+- `peer_events.csv`: pubsub peer add/remove events;
+- `rpc_events.csv`: send/recv RPC counters;
+- `summary.json`: compact run summary.

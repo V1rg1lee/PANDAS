@@ -311,10 +311,28 @@ Search for positive indicators:
     grep -RniE "Running GossipSub node|Connected static peer|GossipSub publish|GossipSub message received|GossipSub node done" "$EXP"/Log/*.txt | head -150
 ```
 
+Extract topology data:
+```sh
+    cd "$SRC"
+    python3 analysis/extract_gossipsub_topology.py \
+      "$RESULTS" \
+      --nodes-file "$NODES" \
+      --out-dir "$EXP/topology"
+```
+
+Check extracted topology files:
+```sh
+    find "$EXP/topology" -type f | sort
+    cat "$EXP/topology/summary.json"
+    cat "$EXP/topology/mesh_final_edges.csv"
+    cat "$EXP/topology/mesh_final_degrees.csv"
+```
+
 A successful smoke test should show:
 - all run.sh jobs finished successfully;
 - one log file per node;
 - one `.trace` file per node in `$RESULTS`;
 - static libp2p peer connections are established from the CSV;
 - messages are published and received through GossipSub;
+- topology CSV files are generated under `$EXP/topology`;
 - nodes shut down cleanly after the configured duration.

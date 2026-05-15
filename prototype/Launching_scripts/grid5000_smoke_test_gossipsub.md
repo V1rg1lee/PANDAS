@@ -32,8 +32,8 @@ Do not clone the repository directly on access.grid5000.fr.
 On the site frontend:
 ```sh
     cd ~
-    git clone https://github.com/V1rg1lee/PANDAS.git
-    cd ~/PANDAS/prototype
+    git clone https://github.com/V1rg1lee/GossipSub-Minimal.git
+    cd ~/GossipSub-Minimal/prototype
 ```
 
 ## 3. Reserve 3 nodes
@@ -56,7 +56,7 @@ Inside the OAR interactive session:
 
 ```sh
     LOGIN=$USER
-    SRC=/home/$LOGIN/PANDAS/prototype
+    SRC=/home/$LOGIN/GossipSub-Minimal/prototype
     EXP=/home/$LOGIN/results/gossipsub-smoke-$(date +%Y%m%d-%H%M%S)
     NODES=$EXP/NodesFiles/nodes.csv
     KEYS=$EXP/NodesFiles/keys

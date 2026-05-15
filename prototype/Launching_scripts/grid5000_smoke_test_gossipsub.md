@@ -311,7 +311,7 @@ Search for positive indicators:
     grep -RniE "Running GossipSub node|Connected static peer|GossipSub publish|GossipSub message received|GossipSub node done" "$EXP"/Log/*.txt | head -150
 ```
 
-Extract topology data:
+Extract topology snapshots and metrics:
 ```sh
     cd "$SRC"
 
@@ -320,21 +320,24 @@ Extract topology data:
     echo "NODES=$NODES"
     test -n "$EXP" && test -n "$RESULTS" && test -n "$NODES"
 
-    python3 analysis/extract_gossipsub_topology.py \
+    python3 analysis/topology_pipeline.py pipeline-traces \
       "$RESULTS" \
-      --nodes-file "$NODES" \
-      --out-dir "$EXP/topology"
+      --out-dir "$EXP/topology_pipeline" \
+      --heartbeat-ms 1000 \
+      --topic gossipsub-smoke
 ```
 
 Check extracted topology files:
 ```sh
-    find "$EXP/topology" -type f | sort
-    cat "$EXP/topology/summary.json"
-    cat "$EXP/topology/mesh_final_edges.csv"
-    cat "$EXP/topology/mesh_final_edges_undirected.csv"
-    cat "$EXP/topology/mesh_final_degrees.csv"
-    cat "$EXP/topology/mesh_final_degrees_undirected.csv"
-    cat "$EXP/topology/graph_stats.csv"
+    find "$EXP/topology_pipeline" -type f | sort
+    cat "$EXP/topology_pipeline/snapshots/metadata.json"
+    head "$EXP/topology_pipeline/snapshots/snapshots.csv"
+    cat "$EXP/topology_pipeline/metrics/summary.json"
+    cat "$EXP/topology_pipeline/metrics/methodology.md"
+    head "$EXP/topology_pipeline/metrics/degree_timeseries.csv"
+    head "$EXP/topology_pipeline/metrics/churn_timeseries.csv"
+    head "$EXP/topology_pipeline/metrics/control_timeseries.csv"
+    head "$EXP/topology_pipeline/metrics/global_graph_timeseries.csv"
 ```
 
 A successful smoke test should show:
@@ -343,5 +346,6 @@ A successful smoke test should show:
 - one `.trace` file per node in `$RESULTS`;
 - static libp2p peer connections are established from the CSV;
 - messages are published and received through GossipSub;
-- topology CSV files are generated under `$EXP/topology`;
+- topology snapshots are generated under `$EXP/topology_pipeline/snapshots`;
+- statistical topology metrics are generated under `$EXP/topology_pipeline/metrics`;
 - nodes shut down cleanly after the configured duration.

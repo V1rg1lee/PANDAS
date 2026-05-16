@@ -365,3 +365,15 @@ A successful run should show:
 - topology snapshots under `$EXP/topology_pipeline/snapshots`;
 - statistical topology metrics under `$EXP/topology_pipeline/metrics`;
 - nodes shutting down cleanly after the configured duration.
+
+---
+
+## 14. Copy results to your local machine
+
+From your local machine:
+```sh
+scp <user>@access.grid5000.fr:~/<city>/results/gossipsub-scoring-20-YYYYMMDD-HHMMSS/topology_pipeline/metrics/* .
+
+scp -J <user>@access.grid5000.fr \
+    <user>@<city>.grid5000.fr:/home/<user>/results/gossipsub-scoring-20-YYYYMMDD-HHMMSS/results/* .
+```

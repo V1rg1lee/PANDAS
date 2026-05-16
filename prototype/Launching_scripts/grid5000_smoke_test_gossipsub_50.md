@@ -241,3 +241,15 @@ Expected:
 - 40 honest nodes and 10 degraded nodes;
 - degraded nodes visible in logs and score snapshots;
 - topology metrics under `$EXP/topology_pipeline/metrics`.
+
+---
+
+## 11. Copy results to your local machine
+
+From your local machine:
+```sh
+scp <user>@access.grid5000.fr:~/<city>/results/gossipsub-scoring-50-YYYYMMDD-HHMMSS/topology_pipeline/metrics/* .
+
+scp -J <user>@access.grid5000.fr \
+    <user>@<city>.grid5000.fr:/home/<user>/results/gossipsub-scoring-50-YYYYMMDD-HHMMSS/results/* .
+```

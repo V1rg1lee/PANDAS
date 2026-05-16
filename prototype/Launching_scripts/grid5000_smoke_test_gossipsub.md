@@ -17,12 +17,12 @@ Goal:
 
 From the local machine:
 ```sh
-    ssh g5k
+ssh g5k
 ```
 
-Then connect to the Lille site frontend:
+Then connect to the <city> site frontend:
 ```sh
-    ssh lille
+ssh <city>
 ```
 
 ---
@@ -33,9 +33,9 @@ Do not clone the repository directly on access.grid5000.fr.
 
 On the site frontend:
 ```sh
-    cd ~
-    git clone https://github.com/V1rg1lee/GossipSub-Minimal.git
-    cd ~/GossipSub-Minimal/prototype
+cd ~
+git clone https://github.com/V1rg1lee/GossipSub-Minimal.git
+cd ~/GossipSub-Minimal/prototype
 ```
 
 ---
@@ -44,14 +44,14 @@ On the site frontend:
 
 From the site frontend:
 ```sh
-    oarsub -I -l nodes=20,walltime=0:45:00
+oarsub -I -l nodes=20,walltime=0:45:00
 ```
 
 Inside the OAR interactive session:
 ```sh
-    hostname
-    echo "$OAR_NODEFILE"
-    cat "$OAR_NODEFILE"
+hostname
+echo "$OAR_NODEFILE"
+cat "$OAR_NODEFILE"
 ```
 
 ---
@@ -59,32 +59,32 @@ Inside the OAR interactive session:
 ## 4. Define experiment variables
 
 ```sh
-    LOGIN=$USER
-    NODE_COUNT=20
-    DEGRADED_PERCENT=20
-    DEGRADED_COUNT=$(((NODE_COUNT * DEGRADED_PERCENT + 99) / 100))
-    HONEST_COUNT=$((NODE_COUNT - DEGRADED_COUNT))
+LOGIN=$USER
+NODE_COUNT=20
+DEGRADED_PERCENT=20
+DEGRADED_COUNT=$(((NODE_COUNT * DEGRADED_PERCENT + 99) / 100))
+HONEST_COUNT=$((NODE_COUNT - DEGRADED_COUNT))
 
-    SRC=/home/$LOGIN/GossipSub-Minimal/prototype
-    EXP=/home/$LOGIN/results/gossipsub-scoring-$(date +%Y%m%d-%H%M%S)
-    NODES=$EXP/NodesFiles/nodes.csv
-    KEYS=$EXP/NodesFiles/keys
-    RESULTS=$EXP/results
-    TOPIC=gossipsub-scoring
+SRC=/home/$LOGIN/GossipSub-Minimal/prototype
+EXP=/home/$LOGIN/results/gossipsub-scoring-$(date +%Y%m%d-%H%M%S)
+NODES=$EXP/NodesFiles/nodes.csv
+KEYS=$EXP/NodesFiles/keys
+RESULTS=$EXP/results
+TOPIC=gossipsub-scoring
 
-    mkdir -p "$KEYS" "$RESULTS/nodeLog" "$EXP/Log"
+mkdir -p "$KEYS" "$RESULTS/nodeLog" "$EXP/Log"
 
-    echo "LOGIN=$LOGIN"
-    echo "NODE_COUNT=$NODE_COUNT"
-    echo "DEGRADED_PERCENT=$DEGRADED_PERCENT"
-    echo "DEGRADED_COUNT=$DEGRADED_COUNT"
-    echo "HONEST_COUNT=$HONEST_COUNT"
-    echo "SRC=$SRC"
-    echo "EXP=$EXP"
-    echo "NODES=$NODES"
-    echo "KEYS=$KEYS"
-    echo "RESULTS=$RESULTS"
-    echo "TOPIC=$TOPIC"
+echo "LOGIN=$LOGIN"
+echo "NODE_COUNT=$NODE_COUNT"
+echo "DEGRADED_PERCENT=$DEGRADED_PERCENT"
+echo "DEGRADED_COUNT=$DEGRADED_COUNT"
+echo "HONEST_COUNT=$HONEST_COUNT"
+echo "SRC=$SRC"
+echo "EXP=$EXP"
+echo "NODES=$NODES"
+echo "KEYS=$KEYS"
+echo "RESULTS=$RESULTS"
+echo "TOPIC=$TOPIC"
 ```
 
 ---
@@ -92,23 +92,23 @@ Inside the OAR interactive session:
 ## 5. Extract reserved hosts and IPs
 
 ```sh
-    mapfile -t HOSTS < <(sort -u "$OAR_NODEFILE" | head -"$NODE_COUNT")
-    printf '%s\n' "${HOSTS[@]}"
+mapfile -t HOSTS < <(sort -u "$OAR_NODEFILE" | head -"$NODE_COUNT")
+printf '%s\n' "${HOSTS[@]}"
 
-    mapfile -t IPS < <(for h in "${HOSTS[@]}"; do getent hosts "$h" | awk '{print $1; exit}'; done)
-    printf '%s\n' "${IPS[@]}"
+mapfile -t IPS < <(for h in "${HOSTS[@]}"; do getent hosts "$h" | awk '{print $1; exit}'; done)
+printf '%s\n' "${IPS[@]}"
 ```
 
 Check:
 ```sh
-    echo "HOSTS:"
-    printf '%s\n' "${HOSTS[@]}"
+echo "HOSTS:"
+printf '%s\n' "${HOSTS[@]}"
 
-    echo "IPS:"
-    printf '%s\n' "${IPS[@]}"
+echo "IPS:"
+printf '%s\n' "${IPS[@]}"
 
-    test "${#HOSTS[@]}" -eq "$NODE_COUNT"
-    test "${#IPS[@]}" -eq "$NODE_COUNT"
+test "${#HOSTS[@]}" -eq "$NODE_COUNT"
+test "${#IPS[@]}" -eq "$NODE_COUNT"
 ```
 
 ---
@@ -117,13 +117,13 @@ Check:
 
 If go is not available:
 ```sh
-    cd /tmp
-    sudo-g5k
+cd /tmp
+sudo-g5k
 
-    wget https://go.dev/dl/go1.21.6.linux-amd64.tar.gz
-    sudo tar -C /usr/local -xzf go1.21.6.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.21.6.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.21.6.linux-amd64.tar.gz
 
-    export PATH=$PATH:/usr/local/go/bin
+export PATH=$PATH:/usr/local/go/bin
 ```
 
 ---
@@ -131,9 +131,9 @@ If go is not available:
 ## 7. Build keygen
 
 ```sh
-    cd "$SRC/keygen"
-    go build -o keygen .
-    ls -lh "$SRC/keygen/keygen"
+cd "$SRC/keygen"
+go build -o keygen .
+ls -lh "$SRC/keygen/keygen"
 ```
 
 Important: keygen must be executed on the node that owns the IP/port, because
@@ -147,18 +147,18 @@ ID.
 Before a new run:
 
 ```sh
-    for h in "${HOSTS[@]}"; do
-      echo "Killing old processes on $h"
-      ssh "$h" "pkill -f libp2p-das || true"
-    done
+for h in "${HOSTS[@]}"; do
+    echo "Killing old processes on $h"
+    ssh "$h" "pkill -f libp2p-das || true"
+done
 ```
 
 Optional check:
 ```sh
-    for h in "${HOSTS[@]}"; do
-      echo "=== $h ==="
-      ssh "$h" "pgrep -af 'libp2p-das|keygen' || true"
-    done
+for h in "${HOSTS[@]}"; do
+    echo "=== $h ==="
+    ssh "$h" "pgrep -af 'libp2p-das|keygen' || true"
+done
 ```
 
 ---
@@ -167,55 +167,55 @@ Optional check:
 
 Use high ports to avoid conflicts with previous runs.
 ```sh
-    BASE_PORT=20000
-    BASE_UDP=22000
+BASE_PORT=20000
+BASE_UDP=22000
 
-    : > "$NODES"
-    rm -f "$KEYS"/*.key
+: > "$NODES"
+rm -f "$KEYS"/*.key
 
-    for i in $(seq 0 $((NODE_COUNT - 1))); do
-      h=${HOSTS[$i]}
-      ip=${IPS[$i]}
-      port=$((BASE_PORT + i))
-      udp=$((BASE_UDP + i))
+for i in $(seq 0 $((NODE_COUNT - 1))); do
+    h=${HOSTS[$i]}
+    ip=${IPS[$i]}
+    port=$((BASE_PORT + i))
+    udp=$((BASE_UDP + i))
 
-      type=node
-      if [ "$i" -ge "$HONEST_COUNT" ]; then
-        type=degraded
-      fi
+    type=node
+    if [ "$i" -ge "$HONEST_COUNT" ]; then
+    type=degraded
+    fi
 
-      nick="${type}${port}"
-      key="$KEYS/${ip}-${nick}.key"
+    nick="${type}${port}"
+    key="$KEYS/${ip}-${nick}.key"
 
-      echo "Generating key for $nick on $h / $ip:$port"
+    echo "Generating key for $nick on $h / $ip:$port"
 
-      maddr=$(ssh "$h" "export PATH=\$PATH:/usr/local/go/bin; '$SRC/keygen/keygen' '$key' '$ip' '$port'")
+    maddr=$(ssh "$h" "export PATH=\$PATH:/usr/local/go/bin; '$SRC/keygen/keygen' '$key' '$ip' '$port'")
 
-      if [ -z "$maddr" ]; then
-        echo "ERROR: empty multiaddr for $h"
-        exit 1
-      fi
+    if [ -z "$maddr" ]; then
+    echo "ERROR: empty multiaddr for $h"
+    exit 1
+    fi
 
-      printf "%s,%s,%s,%s,%s,%s\n" "$nick" "$port" "$udp" "$ip" "$maddr" "$type" >> "$NODES"
-    done
+    printf "%s,%s,%s,%s,%s,%s\n" "$nick" "$port" "$udp" "$ip" "$maddr" "$type" >> "$NODES"
+done
 ```
 
 Check:
 ```sh
-    echo "=== nodes.csv ==="
-    cat "$NODES"
+echo "=== nodes.csv ==="
+cat "$NODES"
 
-    echo "=== role counts ==="
-    cut -d, -f6 "$NODES" | sort | uniq -c
+echo "=== role counts ==="
+cut -d, -f6 "$NODES" | sort | uniq -c
 
-    echo "=== keys ==="
-    ls -lh "$KEYS"
+echo "=== keys ==="
+ls -lh "$KEYS"
 ```
 
 Expected role count:
 ```sh
-    4 degraded
-    16 node
+4 degraded
+16 node
 ```
 
 Do not continue if a multiaddr field is empty.
@@ -225,13 +225,13 @@ Do not continue if a multiaddr field is empty.
 ## 10. Install/build GossipSub on each reserved node
 
 ```sh
-    for h in "${HOSTS[@]}"; do
-      echo "Installing on $h"
-      ssh "$h" "GOSSIPSUB_SOURCE_DIR='$SRC' '$SRC/Launching_scripts/server_install.sh' '$LOGIN'" \
-        > "$RESULTS/nodeLog/install_${h}.txt" 2>&1 &
-    done
+for h in "${HOSTS[@]}"; do
+    echo "Installing on $h"
+    ssh "$h" "GOSSIPSUB_SOURCE_DIR='$SRC' '$SRC/Launching_scripts/server_install.sh' '$LOGIN'" \
+    > "$RESULTS/nodeLog/install_${h}.txt" 2>&1 &
+done
 
-    wait
+wait
 ```
 
 ---
@@ -239,39 +239,39 @@ Do not continue if a multiaddr field is empty.
 ## 11. Launch the 20-node scoring experiment
 
 ```sh
-    for i in $(seq 0 $((NODE_COUNT - 1))); do
-      echo "Starting node ${HOSTS[$i]} / ${IPS[$i]}"
+for i in $(seq 0 $((NODE_COUNT - 1))); do
+    echo "Starting node ${HOSTS[$i]} / ${IPS[$i]}"
 
-      ssh "${HOSTS[$i]}" \
-         "GOSSIPSUB_SOURCE_DIR='$SRC' \
-         GOSSIPSUB_WORK_DIR='/tmp/gossipsub-scoring' \
-         GOSSIPSUB_SLEEP_MARGIN=10 \
-         GOSSIPSUB_TOPIC='$TOPIC' \
-         GOSSIPSUB_INTERVAL=5 \
-         GOSSIPSUB_MESSAGE_BYTES=512 \
-         GOSSIPSUB_ENABLE_PEER_SCORE=true \
-         GOSSIPSUB_D=6 \
-         GOSSIPSUB_DLO=5 \
-         GOSSIPSUB_DHI=12 \
-         GOSSIPSUB_DSCORE=4 \
-         GOSSIPSUB_DOUT=2 \
-         GOSSIPSUB_SCORE_INSPECT=5 \
-         GOSSIPSUB_APP_DEGRADED_SCORE=-50 \
-         GOSSIPSUB_INVALID_PENALTY=-20 \
-         GOSSIPSUB_INVALID_PENALTY_TTL=60 \
-         GOSSIPSUB_DEGRADED_INVALID_PUBLISH_PCT=50 \
-         GOSSIPSUB_DEGRADED_DROP_PCT=50 \
-         '$SRC/Launching_scripts/run.sh' \
-         '$NODES' \
-         '$KEYS/' \
-         '$RESULTS/' \
-         '${IPS[$i]}' \
-         180 \
-         '$EXP' \
-         >> '$RESULTS/nodeLog/run_sh_output_${IPS[$i]}.txt' 2>&1" &
-    done
+    ssh "${HOSTS[$i]}" \
+        "GOSSIPSUB_SOURCE_DIR='$SRC' \
+        GOSSIPSUB_WORK_DIR='/tmp/gossipsub-scoring' \
+        GOSSIPSUB_SLEEP_MARGIN=10 \
+        GOSSIPSUB_TOPIC='$TOPIC' \
+        GOSSIPSUB_INTERVAL=5 \
+        GOSSIPSUB_MESSAGE_BYTES=512 \
+        GOSSIPSUB_ENABLE_PEER_SCORE=true \
+        GOSSIPSUB_D=6 \
+        GOSSIPSUB_DLO=5 \
+        GOSSIPSUB_DHI=12 \
+        GOSSIPSUB_DSCORE=4 \
+        GOSSIPSUB_DOUT=2 \
+        GOSSIPSUB_SCORE_INSPECT=5 \
+        GOSSIPSUB_APP_DEGRADED_SCORE=-50 \
+        GOSSIPSUB_INVALID_PENALTY=-20 \
+        GOSSIPSUB_INVALID_PENALTY_TTL=60 \
+        GOSSIPSUB_DEGRADED_INVALID_PUBLISH_PCT=50 \
+        GOSSIPSUB_DEGRADED_DROP_PCT=50 \
+        '$SRC/Launching_scripts/run.sh' \
+        '$NODES' \
+        '$KEYS/' \
+        '$RESULTS/' \
+        '${IPS[$i]}' \
+        180 \
+        '$EXP' \
+        >> '$RESULTS/nodeLog/run_sh_output_${IPS[$i]}.txt' 2>&1" &
+done
 
-    wait
+wait
 ```
 
 ---
@@ -280,45 +280,45 @@ Do not continue if a multiaddr field is empty.
 
 Check run.sh outputs:
 ```sh
-    cat "$RESULTS"/nodeLog/run_sh_output_*.txt
+cat "$RESULTS"/nodeLog/run_sh_output_*.txt
 ```
 
 Expected:
 ```sh
-    All jobs finished successfully
+All jobs finished successfully
 ```
 
 Check generated files:
 ```sh
-    find "$EXP" -maxdepth 4 -type f | sort
+find "$EXP" -maxdepth 4 -type f | sort
 ```
 
 Check node logs:
 ```sh
-    ls -lh "$EXP"/Log/
-    head -120 "$EXP"/Log/*.txt
+ls -lh "$EXP"/Log/
+head -120 "$EXP"/Log/*.txt
 ```
 
 Check GossipSub traces:
 ```sh
-    ls -lh "$RESULTS"/*.trace
-    head -20 "$RESULTS"/*.trace
+ls -lh "$RESULTS"/*.trace
+head -20 "$RESULTS"/*.trace
 ```
 
 Check score snapshots:
 ```sh
-    ls -lh "$RESULTS"/*.scores.csv
-    head "$RESULTS"/*.scores.csv
+ls -lh "$RESULTS"/*.scores.csv
+head "$RESULTS"/*.scores.csv
 ```
 
 Search for severe errors:
 ```sh
-    grep -RniE "panic|fatal|failed to listen|address already in use|empty multiaddr|division by zero|permission denied|no such file" "$EXP" || true
+grep -RniE "panic|fatal|failed to listen|address already in use|empty multiaddr|division by zero|permission denied|no such file" "$EXP" || true
 ```
 
 Search for positive/degraded indicators:
 ```sh
-    grep -RniE "Running GossipSub node|role=degraded|Connected static peer|GossipSub publish|GossipSub message received|GossipSub validator rejected|GossipSub degraded drop|GossipSub node done" "$EXP"/Log/*.txt | head -200
+grep -RniE "Running GossipSub node|role=degraded|Connected static peer|GossipSub publish|GossipSub message received|GossipSub validator rejected|GossipSub degraded drop|GossipSub node done" "$EXP"/Log/*.txt | head -200
 ```
 
 ---
@@ -326,32 +326,32 @@ Search for positive/degraded indicators:
 ## 13. Extract topology snapshots and metrics
 
 ```sh
-    cd "$SRC"
+cd "$SRC"
 
-    echo "EXP=$EXP"
-    echo "RESULTS=$RESULTS"
-    echo "NODES=$NODES"
-    echo "TOPIC=$TOPIC"
-    test -n "$EXP" && test -n "$RESULTS" && test -n "$NODES" && test -n "$TOPIC"
+echo "EXP=$EXP"
+echo "RESULTS=$RESULTS"
+echo "NODES=$NODES"
+echo "TOPIC=$TOPIC"
+test -n "$EXP" && test -n "$RESULTS" && test -n "$NODES" && test -n "$TOPIC"
 
-    python3 analysis/topology_pipeline.py pipeline-traces \
-      "$RESULTS" \
-      --out-dir "$EXP/topology_pipeline" \
-      --heartbeat-ms 1000 \
-      --topic "$TOPIC"
+python3 analysis/topology_pipeline.py pipeline-traces \
+    "$RESULTS" \
+    --out-dir "$EXP/topology_pipeline" \
+    --heartbeat-ms 1000 \
+    --topic "$TOPIC"
 ```
 
 Check extracted topology files:
 ```sh
-    find "$EXP/topology_pipeline" -type f | sort
-    cat "$EXP/topology_pipeline/snapshots/metadata.json"
-    head "$EXP/topology_pipeline/snapshots/snapshots.csv"
-    cat "$EXP/topology_pipeline/metrics/summary.json"
-    cat "$EXP/topology_pipeline/metrics/methodology.md"
-    head "$EXP/topology_pipeline/metrics/degree_timeseries.csv"
-    head "$EXP/topology_pipeline/metrics/churn_timeseries.csv"
-    head "$EXP/topology_pipeline/metrics/control_timeseries.csv"
-    head "$EXP/topology_pipeline/metrics/global_graph_timeseries.csv"
+find "$EXP/topology_pipeline" -type f | sort
+cat "$EXP/topology_pipeline/snapshots/metadata.json"
+head "$EXP/topology_pipeline/snapshots/snapshots.csv"
+cat "$EXP/topology_pipeline/metrics/summary.json"
+cat "$EXP/topology_pipeline/metrics/methodology.md"
+head "$EXP/topology_pipeline/metrics/degree_timeseries.csv"
+head "$EXP/topology_pipeline/metrics/churn_timeseries.csv"
+head "$EXP/topology_pipeline/metrics/control_timeseries.csv"
+head "$EXP/topology_pipeline/metrics/global_graph_timeseries.csv"
 ```
 
 A successful run should show:

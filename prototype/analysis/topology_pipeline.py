@@ -135,6 +135,7 @@ def traces_to_snapshots_command(args: argparse.Namespace, snapshots_csv: Path | 
 
     snapshots = reconstruct_snapshots(events, first_ts, heartbeat_ns)
     write_snapshots(snapshots_csv, snapshots, alias_by_peer)
+    write_trace_nodes(snapshots_csv.parent / "nodes.csv", alias_by_peer)
     trace_events_path = snapshots_csv.parent / "trace_events.csv"
     edge_lifetimes_path = snapshots_csv.parent / "edge_lifetimes.csv"
     write_trace_events(trace_events_path, events, alias_by_peer, first_ts, heartbeat_ns)
@@ -168,6 +169,7 @@ def analyze_snapshots_file(snapshots_csv: Path, out_dir: Path) -> None:
         raise SystemExit(f"no snapshots found in {snapshots_csv}")
 
     all_nodes = nodes_from_snapshots(snapshots)
+    all_nodes.update(read_trace_nodes(snapshots_csv.parent / "nodes.csv"))
     write_node_degree_timeseries(out_dir / "node_degree_timeseries.csv", snapshots, all_nodes)
     write_degree_timeseries(out_dir / "degree_timeseries.csv", snapshots, all_nodes)
     write_churn_timeseries(out_dir / "churn_timeseries.csv", snapshots)
@@ -704,6 +706,31 @@ def nodes_from_snapshots(snapshots: list[Snapshot]) -> set[str]:
             nodes.add(edge.source)
             nodes.add(edge.target)
     return nodes
+
+
+def write_trace_nodes(path: Path, aliases: dict[str, str]) -> None:
+    rows = []
+    for peer_id, alias in sorted(aliases.items(), key=lambda item: item[1]):
+        rows.append({
+            "peer_id": peer_id,
+            "alias": alias,
+            "role": role_from_alias(alias),
+        })
+    write_rows(path, rows, ["peer_id", "alias", "role"])
+
+
+def read_trace_nodes(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    with path.open() as handle:
+        reader = csv.DictReader(handle)
+        return {row["alias"] for row in reader if row.get("alias")}
+
+
+def role_from_alias(alias: str) -> str:
+    if alias.startswith("degraded"):
+        return "degraded"
+    return "node"
 
 
 def out_degree(node: str, edges: set[Edge]) -> int:

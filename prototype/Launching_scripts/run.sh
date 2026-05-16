@@ -48,6 +48,18 @@ gossip_topic=${GOSSIPSUB_TOPIC:-"gossipsub-smoke"}
 gossip_interval=${GOSSIPSUB_INTERVAL:-5}
 gossip_message_bytes=${GOSSIPSUB_MESSAGE_BYTES:-512}
 connect_timeout=${GOSSIPSUB_CONNECT_TIMEOUT:-30}
+enable_peer_score=${GOSSIPSUB_ENABLE_PEER_SCORE:-false}
+gossip_d=${GOSSIPSUB_D:-0}
+gossip_dlo=${GOSSIPSUB_DLO:-0}
+gossip_dhi=${GOSSIPSUB_DHI:-0}
+gossip_dscore=${GOSSIPSUB_DSCORE:-0}
+gossip_dout=${GOSSIPSUB_DOUT:-0}
+score_inspect=${GOSSIPSUB_SCORE_INSPECT:-0}
+app_degraded_score=${GOSSIPSUB_APP_DEGRADED_SCORE:--50}
+invalid_penalty=${GOSSIPSUB_INVALID_PENALTY:--20}
+invalid_penalty_ttl=${GOSSIPSUB_INVALID_PENALTY_TTL:-60}
+degraded_invalid_publish_pct=${GOSSIPSUB_DEGRADED_INVALID_PUBLISH_PCT:-0}
+degraded_drop_pct=${GOSSIPSUB_DEGRADED_DROP_PCT:-0}
 
 case "$sleep_margin" in
     ''|*[!0-9]*) die "GOSSIPSUB_SLEEP_MARGIN must be an integer number of seconds, got '$sleep_margin'" ;;
@@ -61,6 +73,22 @@ esac
 case "$connect_timeout" in
     ''|*[!0-9]*) die "GOSSIPSUB_CONNECT_TIMEOUT must be an integer number of seconds, got '$connect_timeout'" ;;
 esac
+for numeric_pair in \
+    "GOSSIPSUB_D:$gossip_d" \
+    "GOSSIPSUB_DLO:$gossip_dlo" \
+    "GOSSIPSUB_DHI:$gossip_dhi" \
+    "GOSSIPSUB_DSCORE:$gossip_dscore" \
+    "GOSSIPSUB_DOUT:$gossip_dout" \
+    "GOSSIPSUB_SCORE_INSPECT:$score_inspect" \
+    "GOSSIPSUB_INVALID_PENALTY_TTL:$invalid_penalty_ttl" \
+    "GOSSIPSUB_DEGRADED_INVALID_PUBLISH_PCT:$degraded_invalid_publish_pct" \
+    "GOSSIPSUB_DEGRADED_DROP_PCT:$degraded_drop_pct"; do
+    name=${numeric_pair%%:*}
+    value=${numeric_pair#*:}
+    case "$value" in
+        ''|*[!0-9]*) die "$name must be an integer, got '$value'" ;;
+    esac
+done
 
 [ -d "$source_dir" ] || die "source directory does not exist: $source_dir"
 
@@ -77,6 +105,9 @@ echo "local_ip=${local_ip}"
 echo "duration=${duration}s"
 echo "source_dir=${source_dir}"
 echo "work_dir=${work_dir}"
+echo "enable_peer_score=${enable_peer_score}"
+echo "gossip_d=${gossip_d} gossip_dlo=${gossip_dlo} gossip_dhi=${gossip_dhi} gossip_dscore=${gossip_dscore} gossip_dout=${gossip_dout}"
+echo "degraded_invalid_publish_pct=${degraded_invalid_publish_pct} degraded_drop_pct=${degraded_drop_pct}"
 
 if [ "$source_dir" != "$work_dir" ]; then
     mkdir -p "$work_dir" || die "failed to create work directory: $work_dir"
@@ -101,7 +132,7 @@ started=0
 while IFS= read -r line || [ -n "$line" ]; do
     [ -n "$line" ] || continue
 
-    IFS=',' read -r nick port _csv_udp_port ip _csv_multiaddr _csv_role <<< "$line"
+    IFS=',' read -r nick port _csv_udp_port ip _csv_multiaddr csv_role <<< "$line"
 
     if [ "$ip" != "$local_ip" ]; then
         continue
@@ -123,6 +154,19 @@ while IFS= read -r line || [ -n "$line" ]; do
         -gossipInterval="$gossip_interval" \
         -gossipMessageBytes="$gossip_message_bytes" \
         -connTimeout="$connect_timeout" \
+        -role="$csv_role" \
+        -enablePeerScore="$enable_peer_score" \
+        -gossipD="$gossip_d" \
+        -gossipDlo="$gossip_dlo" \
+        -gossipDhi="$gossip_dhi" \
+        -gossipDscore="$gossip_dscore" \
+        -gossipDout="$gossip_dout" \
+        -scoreInspect="$score_inspect" \
+        -appDegradedScore="$app_degraded_score" \
+        -invalidPenalty="$invalid_penalty" \
+        -invalidPenaltyTTL="$invalid_penalty_ttl" \
+        -degradedInvalidPublishPct="$degraded_invalid_publish_pct" \
+        -degradedDropPct="$degraded_drop_pct" \
         >> "${node_stdout_dir}/${ip}-${nick}.txt" 2>&1 &
     started=$((started + 1))
 done < "$topo_file"

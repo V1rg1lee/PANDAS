@@ -36,6 +36,14 @@ If you want to delete the experiment results, also remove the experiment directo
     rm -rf "$EXP"
 ```
 
+Killing old processes and cleaning up the environment is important to avoid conflicts with future runs and to free up resources on the Grid5000 nodes.
+```sh
+    for h in "${HOSTS[@]}"; do
+      echo "Killing old processes on $h"
+      ssh "$h" "pkill -f libp2p-das || true"
+    done
+```
+
 ## Exit the session:
 
 ```sh

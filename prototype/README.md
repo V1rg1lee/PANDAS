@@ -32,6 +32,20 @@ The runner uses `nick`, `tcp_port`, `ip`, and `multiaddr`. The `udp_port` and
 - `-gossipMessageBytes`: payload size per publish.
 - `-duration`: run duration in seconds.
 - `-log`: directory where `.trace` files are written.
+- `-enablePeerScore`: enable GossipSub peer scoring.
+- `-gossipD`, `-gossipDlo`, `-gossipDhi`, `-gossipDscore`, `-gossipDout`: explicit mesh parameters.
+- `-scoreInspect`: seconds between peer score CSV snapshots; writes `<nick>.scores.csv`.
+- `-degradedInvalidPublishPct`: percentage of publishes marked invalid by nodes whose role is `degraded`.
+- `-degradedDropPct`: percentage of received application messages ignored by degraded nodes.
+- `-appDegradedScore`: application-specific score assigned to peers whose role is `degraded`.
+
+The sixth column in `nodes.csv` is now meaningful for experiments:
+
+```csv
+nick,tcp_port,udp_port,ip,multiaddr,role
+```
+
+Use `node` for honest nodes and `degraded` for degraded nodes.
 
 ## Grid5000
 

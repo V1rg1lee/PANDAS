@@ -17,6 +17,11 @@ import (
 	"github.com/multiformats/go-multiaddr"
 )
 
+const (
+	honestRole   = "node"
+	degradedRole = "degraded"
+)
+
 type Config struct {
 	IP                 string
 	ListenPort         int
@@ -30,10 +35,24 @@ type Config struct {
 	PublishInterval    int
 	MessageBytes       int
 	ConnectTimeout     int
+	Role               string
+	EnablePeerScore    bool
+	GossipD            int
+	GossipDlo          int
+	GossipDhi          int
+	GossipDscore       int
+	GossipDout         int
+	ScoreInspect       int
+	AppDegradedScore   float64
+	InvalidPenalty     float64
+	InvalidPenaltyTTL  int
+	InvalidPublishPct  int
+	DegradedDropPct    int
 }
 
 type StaticPeer struct {
 	Nick string
+	Role string
 	Info *peer.AddrInfo
 }
 
@@ -59,18 +78,52 @@ func main() {
 	}
 	defer h.Close()
 
-	log.Printf("Running GossipSub node nick=%s ip=%s tcp=%d peer=%s topic=%s", config.Nick, config.IP, config.ListenPort, h.ID(), config.Topic)
+	peers, peerRoles, ownRole, err := readStaticTopology(config.NodeFile, h.ID())
+	if err != nil {
+		log.Fatalf("failed to read topology: %v", err)
+	}
+	if config.Role == "" {
+		config.Role = ownRole
+	}
+	if config.Role == "" {
+		config.Role = honestRole
+	}
 
-	pub, err := CreatePubSubWithTopic(h, ctx, config.LogDirectory, config.Nick, config.Topic, config.MessageBytes)
+	log.Printf(
+		"Running GossipSub node nick=%s role=%s ip=%s tcp=%d peer=%s topic=%s scoring=%t invalid_publish_pct=%d degraded_drop_pct=%d",
+		config.Nick,
+		config.Role,
+		config.IP,
+		config.ListenPort,
+		h.ID(),
+		config.Topic,
+		config.EnablePeerScore,
+		config.InvalidPublishPct,
+		config.DegradedDropPct,
+	)
+
+	pub, err := CreatePubSubWithTopic(h, ctx, PubSubConfig{
+		LogDirectory:                  config.LogDirectory,
+		Nick:                          config.Nick,
+		Topic:                         config.Topic,
+		MessageBytes:                  config.MessageBytes,
+		EnablePeerScore:               config.EnablePeerScore,
+		PeerRoles:                     peerRoles,
+		AppSpecificDegradedScore:      config.AppDegradedScore,
+		ScoreInspectInterval:          time.Duration(config.ScoreInspect) * time.Second,
+		GossipD:                       config.GossipD,
+		GossipDlo:                     config.GossipDlo,
+		GossipDhi:                     config.GossipDhi,
+		GossipDscore:                  config.GossipDscore,
+		GossipDout:                    config.GossipDout,
+		InvalidMessagePenaltyWeight:   config.InvalidPenalty,
+		InvalidMessagePenaltyHalfLife: time.Duration(config.InvalidPenaltyTTL) * time.Second,
+	})
 	if err != nil {
 		log.Fatalf("failed to create GossipSub: %v", err)
 	}
 	go pub.ReadLoop()
 
-	peers, err := readStaticPeers(config.NodeFile, h.ID())
-	if err != nil {
-		log.Fatalf("failed to read topology: %v", err)
-	}
 	connectStaticPeers(ctx, h, peers, time.Duration(config.ConnectTimeout)*time.Second)
 
 	if err := runGossip(ctx, pub, config); err != nil {
@@ -95,6 +148,19 @@ func parseFlags() Config {
 	flag.IntVar(&config.PublishInterval, "gossipInterval", 5, "seconds between publishes")
 	flag.IntVar(&config.MessageBytes, "gossipMessageBytes", 512, "GossipSub payload size in bytes")
 	flag.IntVar(&config.ConnectTimeout, "connTimeout", 30, "static peer connection retry window in seconds")
+	flag.StringVar(&config.Role, "role", "", "local node role; defaults to the role column in nodes.csv")
+	flag.BoolVar(&config.EnablePeerScore, "enablePeerScore", false, "enable GossipSub peer scoring")
+	flag.IntVar(&config.GossipD, "gossipD", 0, "GossipSub target mesh degree; 0 keeps libp2p default")
+	flag.IntVar(&config.GossipDlo, "gossipDlo", 0, "GossipSub low mesh degree; 0 keeps libp2p default")
+	flag.IntVar(&config.GossipDhi, "gossipDhi", 0, "GossipSub high mesh degree; 0 keeps libp2p default")
+	flag.IntVar(&config.GossipDscore, "gossipDscore", 0, "GossipSub scored peers retained during prune; 0 keeps libp2p default")
+	flag.IntVar(&config.GossipDout, "gossipDout", 0, "GossipSub outbound mesh quota; 0 keeps libp2p default")
+	flag.IntVar(&config.ScoreInspect, "scoreInspect", 0, "seconds between peer score CSV snapshots; 0 disables score output")
+	flag.Float64Var(&config.AppDegradedScore, "appDegradedScore", -50, "application-specific score assigned to peers marked degraded")
+	flag.Float64Var(&config.InvalidPenalty, "invalidPenalty", -20, "topic score weight for invalid message deliveries")
+	flag.IntVar(&config.InvalidPenaltyTTL, "invalidPenaltyTTL", 60, "invalid message delivery penalty half-life in seconds")
+	flag.IntVar(&config.InvalidPublishPct, "degradedInvalidPublishPct", 0, "percentage of degraded node publishes marked invalid")
+	flag.IntVar(&config.DegradedDropPct, "degradedDropPct", 0, "percentage of received app messages ignored by degraded nodes")
 	flag.Parse()
 
 	if config.Nick == "" {
@@ -114,6 +180,15 @@ func parseFlags() Config {
 	}
 	if config.ConnectTimeout <= 0 {
 		log.Fatal("-connTimeout must be positive")
+	}
+	if config.InvalidPenaltyTTL <= 0 {
+		log.Fatal("-invalidPenaltyTTL must be positive")
+	}
+	if !validPercent(config.InvalidPublishPct) {
+		log.Fatal("-degradedInvalidPublishPct must be between 0 and 100")
+	}
+	if !validPercent(config.DegradedDropPct) {
+		log.Fatal("-degradedDropPct must be between 0 and 100")
 	}
 
 	return config
@@ -138,44 +213,50 @@ func makeHost(config Config) (host.Host, error) {
 	)
 }
 
-func readStaticPeers(path string, ownID peer.ID) ([]StaticPeer, error) {
+func readStaticTopology(path string, ownID peer.ID) ([]StaticPeer, map[peer.ID]string, string, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
 	defer file.Close()
 
 	records, err := csv.NewReader(file).ReadAll()
 	if err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
 
 	peers := make([]StaticPeer, 0, len(records))
+	roles := make(map[peer.ID]string, len(records))
+	ownRole := ""
 	for row, record := range records {
 		if len(record) != 6 {
-			return nil, fmt.Errorf("invalid topology row %d: expected 6 columns, got %d", row+1, len(record))
+			return nil, nil, "", fmt.Errorf("invalid topology row %d: expected 6 columns, got %d", row+1, len(record))
 		}
 
 		addr, err := multiaddr.NewMultiaddr(record[4])
 		if err != nil {
-			return nil, fmt.Errorf("invalid multiaddr at row %d: %w", row+1, err)
+			return nil, nil, "", fmt.Errorf("invalid multiaddr at row %d: %w", row+1, err)
 		}
 
 		info, err := peer.AddrInfoFromP2pAddr(addr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid peer info at row %d: %w", row+1, err)
+			return nil, nil, "", fmt.Errorf("invalid peer info at row %d: %w", row+1, err)
 		}
+		role := normalizeRole(record[5])
+		roles[info.ID] = role
 		if info.ID == ownID {
+			ownRole = role
 			continue
 		}
 
 		peers = append(peers, StaticPeer{
 			Nick: record[0],
+			Role: role,
 			Info: info,
 		})
 	}
 
-	return peers, nil
+	return peers, roles, ownRole, nil
 }
 
 func connectStaticPeers(ctx context.Context, h host.Host, peers []StaticPeer, timeout time.Duration) {
@@ -199,7 +280,7 @@ func connectStaticPeers(ctx context.Context, h host.Host, peers []StaticPeer, ti
 				log.Printf("Static peer connect failed nick=%s peer=%s: %v", staticPeer.Nick, id, err)
 				continue
 			}
-			log.Printf("Connected static peer nick=%s peer=%s", staticPeer.Nick, id)
+			log.Printf("Connected static peer nick=%s role=%s peer=%s", staticPeer.Nick, staticPeer.Role, id)
 			delete(pending, id)
 		}
 
@@ -227,7 +308,8 @@ func runGossip(ctx context.Context, pub *GossipPubSub, config Config) error {
 	publishID := 0
 
 	publish := func() {
-		if err := pub.Publish(publishID); err != nil {
+		invalid := config.Role == degradedRole && percentHit(publishID, config.InvalidPublishPct)
+		if err := pub.Publish(publishID, invalid); err != nil {
 			log.Printf("GossipSub publish failed message=%d: %v", publishID, err)
 		}
 		publishID++
@@ -244,11 +326,36 @@ func runGossip(ctx context.Context, pub *GossipPubSub, config Config) error {
 			if !ok {
 				return nil
 			}
+			if config.Role == degradedRole && percentHit(msg.Sequence, config.DegradedDropPct) {
+				log.Printf("GossipSub degraded drop sender=%s sequence=%d bytes=%d", msg.SenderID, msg.Sequence, len(msg.Payload))
+				continue
+			}
 			log.Printf("GossipSub message received sender=%s sequence=%d bytes=%d", msg.SenderID, msg.Sequence, len(msg.Payload))
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
+}
+
+func normalizeRole(role string) string {
+	if role == degradedRole {
+		return degradedRole
+	}
+	return honestRole
+}
+
+func validPercent(value int) bool {
+	return value >= 0 && value <= 100
+}
+
+func percentHit(sequence int, pct int) bool {
+	if pct <= 0 {
+		return false
+	}
+	if pct >= 100 {
+		return true
+	}
+	return (sequence*37)%100 < pct
 }
 
 func tracePath(logDir string, nick string) string {

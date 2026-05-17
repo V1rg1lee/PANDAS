@@ -27,7 +27,7 @@ cd ~/GossipSub-Minimal/prototype
 ## 2. Reserve 100 nodes
 
 ```sh
-oarsub -I -l nodes=100,walltime=2:00:00
+oarsub -I -l nodes=100,walltime=00:45:00
 
 hostname
 echo "$OAR_NODEFILE"
@@ -73,6 +73,21 @@ printf '%s\n' "${IPS[@]}"
 
 test "${#HOSTS[@]}" -eq "$NODE_COUNT"
 test "${#IPS[@]}" -eq "$NODE_COUNT"
+```
+
+---
+
+## 4.5 Install Go 
+
+If go is not available:
+```sh
+cd /tmp
+sudo-g5k
+
+wget https://go.dev/dl/go1.21.6.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.21.6.linux-amd64.tar.gz
+
+export PATH=$PATH:/usr/local/go/bin
 ```
 
 ---
